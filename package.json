@@ -1,0 +1,34 @@
+{
+  "name": "graphology-layout-forceatlas2-gpu",
+  "version": "1.0.0",
+  "description": "A GPU based implementation of ForceAtlas2 for Graphology, based on WebGL.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "vite build",
+    "start": "vite --config ./vite-example.config.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@babel/preset-typescript": "^7.23.3",
+    "@preconstruct/cli": "^2.8.3",
+    "@trivago/prettier-plugin-sort-imports": "^4.3.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-prettier": "^5.1.3",
+    "graphology": "^0.25.4",
+    "prettier": "^3.2.5",
+    "sigma": "^3.0.0-beta.25",
+    "typescript": "^5.4.2",
+    "typescript-eslint": "^7.2.0",
+    "vite": "^5.3.4",
+    "vite-plugin-dts": "^4.0.0-beta.1"
+  },
+  "peerDependencies": {
+    "graphology-types": ">=0.19.0"
+  },
+  "author": "",
+  "license": "ISC"
+}
