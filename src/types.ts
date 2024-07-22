@@ -1,28 +1,8 @@
 import { Attributes, EdgeMapper } from "graphology-types";
 
+import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Settings } from "./forceatlas2gpu/consts";
+
 export type LayoutMapping = { [key: string]: { x: number; y: number } };
-
-export type ForceAtlas2Settings = {
-  linLogMode: boolean;
-  outboundAttractionDistribution: boolean;
-  adjustSizes: boolean;
-  edgeWeightInfluence: number;
-  scalingRatio: number;
-  strongGravityMode: boolean;
-  gravity: number;
-  slowDown: number;
-};
-
-export const DEFAULT_FORCE_ATLAS_2_SETTINGS: ForceAtlas2Settings = {
-  linLogMode: false,
-  outboundAttractionDistribution: false,
-  adjustSizes: false,
-  edgeWeightInfluence: 1,
-  scalingRatio: 1,
-  strongGravityMode: false,
-  gravity: 1,
-  slowDown: 1,
-};
 
 export type ForceAtlas2LayoutParameters<
   NodeAttributes extends Attributes = Attributes,
