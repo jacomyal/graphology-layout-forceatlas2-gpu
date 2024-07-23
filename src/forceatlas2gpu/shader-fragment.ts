@@ -21,6 +21,7 @@ export function getFragmentShader({
   const SHADER = /*glsl*/ `
 precision highp float;
 
+#define EPSILON 0.01
 #define NODES_COUNT ${nodesCount}
 #define EDGES_COUNT ${edgesCount}
 #define NODES_POSITION_TEXTURE_SIZE ${nodesCount * NODES_ATTRIBUTES_IN_POSITION_TEXTURE}
@@ -41,10 +42,10 @@ uniform float u_edgeWeightInfluence;
 uniform float u_scalingRatio;
 uniform float u_gravity;
 uniform float u_maxForce;
-uniform float u_slowdown;
+uniform float u_slowDown;
 
 void main() {
-  int nodeIndex = int(floor(v_textureCoord.s * float(NODES_COUNT) + 0.5));
+  int nodeIndex = int(floor(v_textureCoord.s * float(NODES_COUNT) - 0.5 + EPSILON));
   if (nodeIndex > NODES_COUNT) return;
 
   vec4 nodePosition = texture2D(
@@ -55,25 +56,28 @@ void main() {
     u_nodesMetadataTexture,
     vec2(v_textureCoord.s, 1)
   ).rg;
-
+  
   float x = nodePosition.x;
   float y = nodePosition.y;
   float oldDx = nodePosition.b;
   float oldDy = nodePosition.a;
   float dx = 0.0;
   float dy = 0.0;
+  
+  gl_FragColor = vec4(nodeMetadata, 0.0, 0.0);
 
   // REPULSION:
   for (int j = 0; j < NODES_COUNT; j++) {
-    if (nodeIndex != j + 1) {
+    if (j != nodeIndex) {
       vec4 otherNodePosition = texture2D(
         u_nodesPositionTexture,
-        vec2((float(j) + 0.5) / float(NODES_POSITION_TEXTURE_SIZE), 1)
+        vec2((float(j) + 0.5) / float(NODES_COUNT), 0.5)
       );
+    
       vec2 diff = nodePosition.xy - otherNodePosition.xy;
       float dSquare = dot(diff, diff);
 
-      if (dSquare > 0.0) {
+      if (diff.x > 0.0 || diff.y > 0.0) {
         float factor = u_scalingRatio / dSquare;
         dx += diff.x * factor;
         dy += diff.y * factor;
@@ -97,9 +101,12 @@ void main() {
   int edgesOffset = int(nodeMetadata.x);
   int neighborsCount = int(nodeMetadata.y);
   for (int j = 0; j < MAX_NEIGHBORS_COUNT; j++) {
-    if (j >= neighborsCount) break;
+    if (j > neighborsCount) break;
     
-    vec2 edgeData = texture2D(u_edgesTexture, vec2((float(j) + 0.5) / float(EDGES_TEXTURE_SIZE), 1)).rg;
+    vec2 edgeData = texture2D(
+      u_edgesTexture,
+      vec2((float(j) + 0.5) / float(EDGES_COUNT * 2), 1)
+    ).rg;
     float otherNodeIndex = edgeData.x;
     float weight = edgeData.y;
     vec4 otherNodePosition = texture2D(
@@ -140,7 +147,7 @@ void main() {
     dx = dx * u_maxForce / force;
     dy = dy * u_maxForce / force;
   }
-  
+
   float swinging = sqrt(
     pow(oldDx - dx, 2.0)
     + pow(oldDy - dy, 2.0)
@@ -149,7 +156,7 @@ void main() {
     pow(oldDx + dx, 2.0)
     + pow(oldDy + dy, 2.0)
   ) / 2.0;
-  float nodeSpeed = (0.1 * log(1.0 + traction)) / (1.0 + sqrt(swinging)) / u_slowdown;
+  float nodeSpeed = (0.1 * log(1.0 + traction)) / (1.0 + sqrt(swinging)) / u_slowDown;
 
   gl_FragColor.x = x + dx * nodeSpeed;
   gl_FragColor.y = y + dy * nodeSpeed;

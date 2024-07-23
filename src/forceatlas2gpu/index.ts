@@ -51,6 +51,11 @@ export class ForceAtlas2GPU<
   private framebuffer: WebGLFramebuffer;
   private uniformLocations: Record<string, WebGLUniformLocation>;
 
+  private positionLocation: number;
+  private positionBuffer: WebGLBuffer;
+  private textureCoordLocation: number;
+  private textureCoordBuffer: WebGLBuffer;
+
   constructor(graph: Graph<NodeAttributes, EdgeAttributes>, params: Partial<ForceAtlas2Settings> = {}) {
     // Initialize data:
     this.graph = graph;
@@ -61,6 +66,8 @@ export class ForceAtlas2GPU<
 
     // Initialize WebGL2 context and textures:
     this.canvas = document.createElement("canvas");
+    this.canvas.width = graph.order;
+    this.canvas.height = 1;
     const gl = this.canvas.getContext("webgl2");
     if (!gl) throw new Error("WebGL2 is not supported in this browser.");
     this.gl = gl;
@@ -151,25 +158,74 @@ export class ForceAtlas2GPU<
     UNIFORM_SETTINGS.forEach((setting) => {
       this.uniformLocations[setting] = gl.getUniformLocation(this.program, `u_${setting}`);
     });
-    TEXTURES_NAMES.forEach((textureName) => {
+    TEXTURES_NAMES.forEach((textureName, index) => {
       this.uniformLocations[textureName] = gl.getUniformLocation(this.program, `u_${textureName}`);
       const texture = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE0 + index);
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.uniform1i(this.uniformLocations[textureName], index);
 
       (this[textureName] as WebGLTexture) = texture;
     });
+
+    // Activate the output texture
+    gl.activeTexture(gl.TEXTURE0 + TEXTURES_NAMES.length);
+    gl.bindTexture(gl.TEXTURE_2D, this.outputTexture);
+    gl.uniform1i(gl.getUniformLocation(this.program, "u_outputTexture"), TEXTURES_NAMES.length);
+
+    this.positionLocation = gl.getAttribLocation(this.program, "a_position");
+    this.textureCoordLocation = gl.getAttribLocation(this.program, "a_textureCoord");
+
+    // Initialize buffers for attributes
+    this.initBuffers();
+  }
+
+  private initBuffers() {
+    const gl = this.gl;
+
+    // Create a buffer for the positions.
+    this.positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+
+    const positions = new Float32Array([-1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0]);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+    // Create a buffer for the texture coordinates.
+    this.textureCoordBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.textureCoordBuffer);
+
+    const textureCoordinates = new Float32Array([0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+    gl.bufferData(gl.ARRAY_BUFFER, textureCoordinates, gl.STATIC_DRAW);
+  }
+
+  private enableVertexAttributes() {
+    const gl = this.gl;
+
+    // Bind the position buffer.
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+    gl.vertexAttribPointer(this.positionLocation, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(this.positionLocation);
+
+    // Bind the texture coordinate buffer.
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.textureCoordBuffer);
+    gl.vertexAttribPointer(this.textureCoordLocation, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(this.textureCoordLocation);
   }
 
   private refreshTextures() {
     const { gl, graph } = this;
+
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.nodesPositionTexture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, graph.order, 1, 0, gl.RGBA, gl.FLOAT, this.nodesPositionDataArray);
+    gl.activeTexture(gl.TEXTURE0 + 1);
     gl.bindTexture(gl.TEXTURE_2D, this.nodesMetadataTexture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, graph.order, 1, 0, gl.RG, gl.FLOAT, this.nodesMetadataDataArray);
+    gl.activeTexture(gl.TEXTURE0 + 2);
     gl.bindTexture(gl.TEXTURE_2D, this.edgesTexture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, graph.size * 2, 1, 0, gl.RG, gl.FLOAT, this.edgesDataArray);
   }
@@ -201,26 +257,30 @@ export class ForceAtlas2GPU<
     });
 
     // Feed the textures:
+    let k = 0;
     let edgeIndex = 0;
     this.maxNeighborsCount = 0;
-    graph.forEachNode((node, { x, y, dx, dy }: { x: number; y: number; dx: number; dy: number }) => {
+    graph.forEachNode((node, { x, y }: { x: number; y: number }) => {
       const nodeIndex = this.nodeIndices[node];
       const neighbors = neighborsPerSource[nodeIndex];
       const neighborsCount = neighbors.length;
       this.maxNeighborsCount = Math.max(this.maxNeighborsCount, neighborsCount);
 
-      this.nodesPositionDataArray[nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE] = x;
-      this.nodesPositionDataArray[nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE + 1] = y;
-      this.nodesPositionDataArray[nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE + 2] = dx;
-      this.nodesPositionDataArray[nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE + 3] = dy;
+      k = nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE;
+      this.nodesPositionDataArray[k++] = x;
+      this.nodesPositionDataArray[k++] = y;
+      this.nodesPositionDataArray[k++] = 0;
+      this.nodesPositionDataArray[k++] = 0;
 
-      this.nodesMetadataDataArray[nodeIndex * NODES_ATTRIBUTES_IN_METADATA_TEXTURE] = edgeIndex;
-      this.nodesMetadataDataArray[nodeIndex * NODES_ATTRIBUTES_IN_METADATA_TEXTURE + 1] = neighborsCount;
+      k = nodeIndex * NODES_ATTRIBUTES_IN_METADATA_TEXTURE;
+      this.nodesMetadataDataArray[k++] = edgeIndex;
+      this.nodesMetadataDataArray[k++] = neighborsCount;
 
       for (let j = 0; j < neighborsCount; j++) {
         const { weight, index } = neighbors[j];
-        this.edgesDataArray[edgeIndex * EDGES_ATTRIBUTES_IN_TEXTURE] = index;
-        this.edgesDataArray[edgeIndex * EDGES_ATTRIBUTES_IN_TEXTURE + 1] = weight;
+        k = nodeIndex * EDGES_ATTRIBUTES_IN_TEXTURE;
+        this.edgesDataArray[k++] = index;
+        this.edgesDataArray[k++] = weight;
         edgeIndex++;
       }
     });
@@ -240,27 +300,26 @@ export class ForceAtlas2GPU<
     // Unbind the framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-    graph.nodes().forEach((n, i) => {
-      const x = outputArr[4 * i];
-      const y = outputArr[4 * i + 1];
-      const dx = outputArr[4 * i + 2];
-      const dy = outputArr[4 * i + 3];
+    graph.forEachNode((n, { x: oldX, y: oldY }) => {
+      const nodeIndex = this.nodeIndices[n];
+      const x = outputArr[4 * nodeIndex];
+      const y = outputArr[4 * nodeIndex + 1];
+      const dx = x - oldX;
+      const dy = y - oldY;
 
       // Update graph:
       if (updateGraph)
         graph.mergeNodeAttributes(n, {
           x,
           y,
-          dx,
-          dy,
         });
 
       // Update textures data:
-      const nodeIndex = this.nodeIndices[n];
-      this.nodesPositionDataArray[nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE] = x;
-      this.nodesPositionDataArray[nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE + 1] = y;
-      this.nodesPositionDataArray[nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE + 2] = dx;
-      this.nodesPositionDataArray[nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE + 3] = dy;
+      let k = nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE;
+      this.nodesPositionDataArray[k++] = x;
+      this.nodesPositionDataArray[k++] = y;
+      this.nodesPositionDataArray[k++] = dx;
+      this.nodesPositionDataArray[k++] = dy;
     });
 
     this.refreshTextures();
@@ -268,17 +327,15 @@ export class ForceAtlas2GPU<
 
   private checkGraph() {
     const { graph } = this;
-    graph.forEachNode((n, { x, y, dx, dy }: { x?: number; y?: number; dx?: number; dy?: number }) => {
+    graph.forEachNode((n, { x, y }: { x?: number; y?: number }) => {
       graph.mergeNodeAttributes(n, {
         x: typeof x === "number" ? x : 0,
         y: typeof y === "number" ? y : 0,
-        dx: typeof dx === "number" ? dx : 0,
-        dy: typeof dy === "number" ? dy : 0,
       });
     });
     graph.forEachEdge((e, { weight }: { weight?: number }) => {
       graph.mergeEdgeAttributes(e, {
-        weight: typeof weight === "number" ? weight : 0,
+        weight: typeof weight === "number" ? weight : 1,
       });
     });
   }
@@ -305,9 +362,6 @@ export class ForceAtlas2GPU<
     UNIFORM_SETTINGS.forEach((setting: keyof ForceAtlas2Settings) => {
       gl.uniform1f(this.uniformLocations[setting], this.params[setting] as number);
     });
-    TEXTURES_NAMES.forEach((texture) => {
-      gl.uniform1i(this.uniformLocations[texture], 0);
-    });
   }
 
   private runProgram() {
@@ -322,6 +376,14 @@ export class ForceAtlas2GPU<
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
       throw new Error("Framebuffer is not complete");
     }
+
+    // Set active texture for the output texture
+    gl.activeTexture(gl.TEXTURE0 + TEXTURES_NAMES.length);
+    gl.bindTexture(gl.TEXTURE_2D, this.outputTexture);
+    gl.uniform1i(gl.getUniformLocation(this.program, "u_outputTexture"), TEXTURES_NAMES.length);
+
+    // Enable vertex attributes
+    this.enableVertexAttributes();
 
     // Run the WebGL program
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -347,7 +409,7 @@ export class ForceAtlas2GPU<
     this.refreshTextures();
     while (iterationsLeft-- > 0) {
       this.runProgram();
-      this.readOutput(false);
+      if (iterationsLeft) this.readOutput(false);
     }
     this.readOutput(true);
   }

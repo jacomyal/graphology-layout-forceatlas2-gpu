@@ -1,7 +1,6 @@
 import Graph from "graphology";
 import Sigma from "sigma";
 
-import forceAtlas2GPU from "../src";
 import { ForceAtlas2GPU } from "../src/forceatlas2gpu";
 
 async function init() {
@@ -11,11 +10,16 @@ async function init() {
   graph.import(data);
 
   const container = document.getElementById("stage") as HTMLDivElement;
-  const renderer = new Sigma(graph, container);
   const fa2 = new ForceAtlas2GPU(graph);
+  const _renderer = new Sigma(graph, container);
 
-  fa2.run({ iterations: 100 });
-  renderer.refresh();
+  const run = () => {
+    fa2.run({ iterations: 1 });
+    // setTimeout(run, 100);
+    requestAnimationFrame(run);
+  };
+
+  run();
 }
 
 init().then(console.log).catch(console.error);
