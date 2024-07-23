@@ -34,6 +34,7 @@ export class ForceAtlas2GPU<
   // - edgesOffset: An "integer" pointing at the position of the first of the node neighbors, in the edgesTexture
   // - edgesCount: An "integer" counting the number of this node neighbors
   // - convergence: An internal score that allows slowing nodes on some circumstances
+  // - mass: An internal score that increases for more connected nodes
   private nodesMetadataTexture: WebGLTexture;
   // The edges texture indexes each edge in both directions, since each edge impacts both extremities.
   // The edges are grouped by source node.
@@ -45,6 +46,7 @@ export class ForceAtlas2GPU<
   private maxNeighborsCount: number;
   private nodeIndices: Record<string, number>;
   private nodeConvergences: Record<string, number>;
+  private nodeMasses: Record<string, number>;
   private nodesPositionDataArray: Float32Array;
   private nodesMetadataDataArray: Float32Array;
   private edgesDataArray: Float32Array;
@@ -65,7 +67,9 @@ export class ForceAtlas2GPU<
       ...DEFAULT_FORCE_ATLAS_2_SETTINGS,
       ...params,
     };
+
     this.nodeConvergences = {};
+    this.nodeMasses = {};
 
     // Initialize WebGL2 context and textures:
     this.canvas = document.createElement("canvas");
@@ -227,7 +231,7 @@ export class ForceAtlas2GPU<
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, graph.order, 1, 0, gl.RGBA, gl.FLOAT, this.nodesPositionDataArray);
     gl.activeTexture(gl.TEXTURE0 + 1);
     gl.bindTexture(gl.TEXTURE_2D, this.nodesMetadataTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB32F, graph.order, 1, 0, gl.RGB, gl.FLOAT, this.nodesMetadataDataArray);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, graph.order, 1, 0, gl.RGBA, gl.FLOAT, this.nodesMetadataDataArray);
     gl.activeTexture(gl.TEXTURE0 + 2);
     gl.bindTexture(gl.TEXTURE_2D, this.edgesTexture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, graph.size * 2, 1, 0, gl.RG, gl.FLOAT, this.edgesDataArray);
@@ -243,9 +247,11 @@ export class ForceAtlas2GPU<
 
     // Index nodes per order:
     this.nodeIndices = {};
+    this.nodeMasses = {};
     let i = 0;
     graph.forEachNode((node) => {
       this.nodeIndices[node] = i;
+      this.nodeMasses[node] = 1;
       neighborsPerSource[i] = [];
       i++;
     });
@@ -257,6 +263,8 @@ export class ForceAtlas2GPU<
 
       neighborsPerSource[sourceIndex].push({ weight, index: targetIndex });
       neighborsPerSource[targetIndex].push({ weight, index: sourceIndex });
+      this.nodeMasses[source] += weight;
+      this.nodeMasses[target] += weight;
     });
 
     // Feed the textures:
@@ -279,6 +287,7 @@ export class ForceAtlas2GPU<
       this.nodesMetadataDataArray[k++] = edgeIndex;
       this.nodesMetadataDataArray[k++] = neighborsCount;
       this.nodesMetadataDataArray[k++] = this.nodeConvergences[node] || 1;
+      this.nodesMetadataDataArray[k++] = this.nodeMasses[node] || 1;
 
       for (let j = 0; j < neighborsCount; j++) {
         const { weight, index } = neighbors[j];

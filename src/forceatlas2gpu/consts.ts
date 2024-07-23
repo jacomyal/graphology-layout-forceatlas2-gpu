@@ -1,5 +1,5 @@
 export const NODES_ATTRIBUTES_IN_POSITION_TEXTURE = 4;
-export const NODES_ATTRIBUTES_IN_METADATA_TEXTURE = 3;
+export const NODES_ATTRIBUTES_IN_METADATA_TEXTURE = 4;
 export const EDGES_ATTRIBUTES_IN_TEXTURE = 2;
 
 export type ForceAtlas2Settings = {

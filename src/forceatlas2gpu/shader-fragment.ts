@@ -52,10 +52,10 @@ void main() {
     u_nodesPositionTexture,
     vec2(v_textureCoord.s, 1)
   );
-  vec3 nodeMetadata = texture2D(
+  vec4 nodeMetadata = texture2D(
     u_nodesMetadataTexture,
     vec2(v_textureCoord.s, 1)
-  ).rgb;
+  );
   
   float x = nodePosition.x;
   float y = nodePosition.y;
@@ -64,9 +64,10 @@ void main() {
   float dx = 0.0;
   float dy = 0.0;
 
-  int edgesOffset = int(nodeMetadata.x);
-  int neighborsCount = int(nodeMetadata.y);
-  float nodeConvergence = nodeMetadata.z;
+  int edgesOffset = int(nodeMetadata.r);
+  int neighborsCount = int(nodeMetadata.g);
+  float nodeConvergence = nodeMetadata.b;
+  float nodeMass = nodeMetadata.a;
   
   // REPULSION:
   for (int j = 0; j < NODES_COUNT; j++) {
@@ -75,12 +76,17 @@ void main() {
         u_nodesPositionTexture,
         vec2((float(j) + 0.5) / float(NODES_COUNT), 0.5)
       );
+      vec4 otherNodeMetadata = texture2D(
+        u_nodesMetadataTexture,
+        vec2((float(j) + 0.5) / float(NODES_COUNT), 0.5)
+      );
     
+      float otherNodeMass = otherNodeMetadata.a;
       vec2 diff = nodePosition.xy - otherNodePosition.xy;
       float dSquare = dot(diff, diff);
 
-      if (diff.x > 0.0 || diff.y > 0.0) {
-        float factor = u_scalingRatio / dSquare;
+      if (dSquare > 0.0) {
+        float factor = u_scalingRatio * nodeMass * otherNodeMass / dSquare;
         dx += diff.x * factor;
         dy += diff.y * factor;
       }
@@ -91,9 +97,9 @@ void main() {
   float distanceToCenter = sqrt(x * x + y * y);
   float gravityFactor = 0.0;
   #ifdef STRONG_GRAVITY_MODE
-  gravityFactor = u_gravity;
+  gravityFactor = u_gravity * nodeMass;
   #else
-  if (distanceToCenter > 0.0) gravityFactor = u_gravity / distanceToCenter;
+  if (distanceToCenter > 0.0) gravityFactor = u_gravity * nodeMass / distanceToCenter;
   #endif
 
   dx -= x * gravityFactor;
@@ -144,7 +150,7 @@ void main() {
     dy = dy * u_maxForce / force;
   }
 
-  float swinging = sqrt(
+  float swinging = nodeMass * sqrt(
     pow(oldDx - dx, 2.0)
     + pow(oldDy - dy, 2.0)
   );
