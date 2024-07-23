@@ -27,8 +27,8 @@ precision highp float;
 #define NODES_METADATA_TEXTURE_SIZE ${nodesCount * NODES_ATTRIBUTES_IN_METADATA_TEXTURE}
 #define EDGES_TEXTURE_SIZE ${edgesCount * EDGES_ATTRIBUTES_IN_TEXTURE}
 #define MAX_NEIGHBORS_COUNT ${maxNeighborsCount}
-${linLogMode ? "#define LINLOG_MODE;\n" : ""}
-${strongGravityMode ? "#define STRONG_GRAVITY_MODE;\n" : ""}
+${linLogMode ? "#define LINLOG_MODE;" : ""}
+${strongGravityMode ? "#define STRONG_GRAVITY_MODE;" : ""}
 
 // Textures management:
 uniform sampler2D u_nodesPositionTexture;
@@ -38,24 +38,26 @@ varying vec2 v_textureCoord;
 
 // Settings management:
 uniform float u_edgeWeightInfluence;
-uniform float u_edgesTexture;
+uniform float u_scalingRatio;
 uniform float u_gravity;
 uniform float u_maxForce;
-uniform float u_scalingRatio;
 uniform float u_slowdown;
 
 void main() {
+  int nodeIndex = int(floor(v_textureCoord.s * float(NODES_COUNT) + 0.5));
+  if (nodeIndex > NODES_COUNT) return;
+
   vec4 nodePosition = texture2D(
     u_nodesPositionTexture,
-    vec2(int(floor(v_textureCoord.s * float(NODES_POSITION_TEXTURE_SIZE) + 0.5)), 1)
+    vec2(v_textureCoord.s, 1)
   );
   vec2 nodeMetadata = texture2D(
     u_nodesMetadataTexture,
-    vec2(int(floor(v_textureCoord.s * float(NODES_METADATA_TEXTURE_SIZE) + 0.5)), 1)
-  );
+    vec2(v_textureCoord.s, 1)
+  ).rg;
 
   float x = nodePosition.x;
-  float x = nodePosition.y;
+  float y = nodePosition.y;
   float oldDx = nodePosition.b;
   float oldDy = nodePosition.a;
   float dx = 0.0;
@@ -63,7 +65,7 @@ void main() {
 
   // REPULSION:
   for (int j = 0; j < NODES_COUNT; j++) {
-    if (i != j + 1) {
+    if (nodeIndex != j + 1) {
       vec4 otherNodePosition = texture2D(
         u_nodesPositionTexture,
         vec2((float(j) + 0.5) / float(NODES_POSITION_TEXTURE_SIZE), 1)
@@ -81,13 +83,15 @@ void main() {
 
   // GRAVITY:
   float distanceToCenter = sqrt(x * x + y * y);
-  if (STRONG_GRAVITY_MODE) {
-    if (distanceToCenter > 0.0) factor = u_gravity;
-  } else {
-    if (distanceToCenter > 0.0) factor = u_gravity / distanceToCenter;
-  }
-  dx -= x * factor;
-  dy -= y * factor;
+  float gravityFactor = 0.0;
+  #ifdef STRONG_GRAVITY_MODE
+  gravityFactor = u_gravity;
+  #else
+  if (distanceToCenter > 0.0) gravityFactor = u_gravity / distanceToCenter;
+  #endif
+
+  dx -= x * gravityFactor;
+  dy -= y * gravityFactor;
 
   // ATTRACTION:
   int edgesOffset = int(nodeMetadata.x);
@@ -95,7 +99,7 @@ void main() {
   for (int j = 0; j < MAX_NEIGHBORS_COUNT; j++) {
     if (j >= neighborsCount) break;
     
-    vec2 edgeData = texture2D(u_edgesTexture, vec2((float(j) + 0.5) / float(EDGES_TEXTURE_SIZE), 1));
+    vec2 edgeData = texture2D(u_edgesTexture, vec2((float(j) + 0.5) / float(EDGES_TEXTURE_SIZE), 1)).rg;
     float otherNodeIndex = edgeData.x;
     float weight = edgeData.y;
     vec4 otherNodePosition = texture2D(
@@ -108,22 +112,22 @@ void main() {
     
     float edgeWeightInfluence = pow(weight, u_edgeWeightInfluence);
 
-    float factor;
-    if (LINLOG_MODE) {
-      // LinLog Degree Distributed Anti-collision Attraction
-      if (d > 0.0) {
-        factor = (-u_scalingRatio * edgeWeightInfluence * log(1 + d)) / d;
-      }
-    } else {
-      // Linear Degree Distributed Anti-collision Attraction
-      if (d > 0.0) {
-        factor = -u_scalingRatio * edgeWeightInfluence;
-      }
+    float attractionFactor = 0.0;
+    #ifdef LINLOG_MODE
+    // LinLog Degree Distributed Anti-collision Attraction
+    if (d > 0.0) {
+      attractionFactor = (-u_scalingRatio * edgeWeightInfluence * log(1 + d)) / d;
     }
+    #else
+    // Linear Degree Distributed Anti-collision Attraction
+    if (d > 0.0) {
+      attractionFactor = -u_scalingRatio * edgeWeightInfluence;
+    }
+    #endif
 
     if (d > 0.0) {
-      dx += diff.x * factor;
-      dy += diff.y * factor;
+      dx += diff.x * attractionFactor;
+      dy += diff.y * attractionFactor;
     }
   }
   
@@ -144,7 +148,7 @@ void main() {
   float traction = sqrt(
     pow(oldDx + dx, 2.0)
     + pow(oldDy + dy, 2.0)
-  ) / 2;
+  ) / 2.0;
   float nodeSpeed = (0.1 * log(1.0 + traction)) / (1.0 + sqrt(swinging)) / u_slowdown;
 
   gl_FragColor.x = x + dx * nodeSpeed;
