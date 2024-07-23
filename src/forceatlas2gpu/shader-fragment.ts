@@ -52,10 +52,10 @@ void main() {
     u_nodesPositionTexture,
     vec2(v_textureCoord.s, 1)
   );
-  vec2 nodeMetadata = texture2D(
+  vec3 nodeMetadata = texture2D(
     u_nodesMetadataTexture,
     vec2(v_textureCoord.s, 1)
-  ).rg;
+  ).rgb;
   
   float x = nodePosition.x;
   float y = nodePosition.y;
@@ -63,9 +63,11 @@ void main() {
   float oldDy = nodePosition.a;
   float dx = 0.0;
   float dy = 0.0;
-  
-  gl_FragColor = vec4(nodeMetadata, 0.0, 0.0);
 
+  int edgesOffset = int(nodeMetadata.x);
+  int neighborsCount = int(nodeMetadata.y);
+  float nodeConvergence = nodeMetadata.z;
+  
   // REPULSION:
   for (int j = 0; j < NODES_COUNT; j++) {
     if (j != nodeIndex) {
@@ -98,38 +100,34 @@ void main() {
   dy -= y * gravityFactor;
 
   // ATTRACTION:
-  int edgesOffset = int(nodeMetadata.x);
-  int neighborsCount = int(nodeMetadata.y);
+  
   for (int j = 0; j < MAX_NEIGHBORS_COUNT; j++) {
-    if (j > neighborsCount) break;
+    if (j >= neighborsCount) break;
     
     vec2 edgeData = texture2D(
       u_edgesTexture,
-      vec2((float(j) + 0.5) / float(EDGES_COUNT * 2), 1)
+      vec2((float(j + edgesOffset) + 0.5) / float(EDGES_COUNT * 2), 1)
     ).rg;
     float otherNodeIndex = edgeData.x;
     float weight = edgeData.y;
     vec4 otherNodePosition = texture2D(
       u_nodesPositionTexture,
-      vec2((otherNodeIndex + 0.5) / float(NODES_POSITION_TEXTURE_SIZE), 1)
+      vec2((otherNodeIndex + 0.5) / float(NODES_COUNT), 1)
     );
 
     vec2 diff = nodePosition.xy - otherNodePosition.xy;
     float d = sqrt(dot(diff, diff));
-    
     float edgeWeightInfluence = pow(weight, u_edgeWeightInfluence);
 
     float attractionFactor = 0.0;
     #ifdef LINLOG_MODE
     // LinLog Degree Distributed Anti-collision Attraction
     if (d > 0.0) {
-      attractionFactor = (-u_scalingRatio * edgeWeightInfluence * log(1 + d)) / d;
+      attractionFactor = (-edgeWeightInfluence * log(1 + d)) / d;
     }
     #else
     // Linear Degree Distributed Anti-collision Attraction
-    if (d > 0.0) {
-      attractionFactor = -u_scalingRatio * edgeWeightInfluence;
-    }
+    attractionFactor = -edgeWeightInfluence;
     #endif
 
     if (d > 0.0) {
@@ -139,10 +137,8 @@ void main() {
   }
   
   // APPLY FORCES:
-  float force = sqrt(
-    pow(dx, 2.0)
-    + pow(dy, 2.0)
-  );
+  float forceSquared = pow(dx, 2.0) + pow(dy, 2.0);
+  float force = sqrt(forceSquared);
   if (force > u_maxForce) {
     dx = dx * u_maxForce / force;
     dy = dy * u_maxForce / force;
@@ -152,14 +148,21 @@ void main() {
     pow(oldDx - dx, 2.0)
     + pow(oldDy - dy, 2.0)
   );
+  float swingingFactor = 1.0 / (1.0 + sqrt(swinging));
   float traction = sqrt(
     pow(oldDx + dx, 2.0)
     + pow(oldDy + dy, 2.0)
   ) / 2.0;
-  float nodeSpeed = (0.1 * log(1.0 + traction)) / (1.0 + sqrt(swinging)) / u_slowDown;
+  float nodeSpeed = (nodeConvergence * log(1.0 + traction)) * swingingFactor;
 
-  gl_FragColor.x = x + dx * nodeSpeed;
-  gl_FragColor.y = y + dy * nodeSpeed;
+  gl_FragColor.x = x + dx * nodeSpeed / u_slowDown;
+  gl_FragColor.y = y + dy * nodeSpeed / u_slowDown;
+  
+  // Store new node convergence:
+  gl_FragColor.z = min(
+    1.0,
+    sqrt(nodeSpeed * forceSquared * swingingFactor)
+  );
 }`;
 
   return SHADER;
