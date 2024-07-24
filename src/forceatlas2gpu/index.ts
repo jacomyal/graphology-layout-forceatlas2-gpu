@@ -17,6 +17,9 @@ import { getFragmentShader } from "./shader-fragment";
 import { getVertexShader } from "./shader-vertex";
 import { getTextureSize } from "./utils";
 
+export * from "./consts";
+export * from "./utils";
+
 export class ForceAtlas2GPU<
   NodeAttributes extends Attributes = Attributes,
   EdgeAttributes extends Attributes = Attributes,
