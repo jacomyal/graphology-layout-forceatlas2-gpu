@@ -54,7 +54,7 @@ vec4 readTexture(sampler2D texture, float index, float textureSize) {
   float row = floor(index / textureSize);
   float col = index - row * textureSize;
   return texture2D(
-  texture,
+    texture,
     vec2(
       (col + 0.5) / textureSize,
       (row + 0.5) / textureSize
@@ -84,44 +84,48 @@ void main() {
   float neighborsCount = nodeEdgesPointers.g;
 
   // REPULSION:
+  float repulsionCoefficient = u_scalingRatio;
   for (float j = 0.0; j < NODES_COUNT; j++) {
     if (j != nodeIndex) {
       vec4 otherNodePosition = readTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
       vec3 otherNodeDimensions = readTexture(u_nodesDimensionsTexture, j, NODES_TEXTURE_SIZE).rgb;
-
       float otherNodeMass = otherNodeDimensions.r;
       float otherNodeSize = otherNodeDimensions.g;
+
       vec2 diff = nodePosition.xy - otherNodePosition.xy;
+      float factor = 0.0;
 
       #ifdef ADJUST_SIZES
+        // Anticollision Linear Repulsion
         float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
-        float factor;
         if (d > 0.0) {
-          factor = u_scalingRatio * nodeMass * otherNodeMass / (d * d);
-        } else {
-          factor = 100.0 * u_scalingRatio * nodeMass * otherNodeMass;
+          factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
+        } else if (d < 0.0) {
+          factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
         }
-        dx += diff.x * factor;
-        dy += diff.y * factor;
 
       #else
+        // Linear Repulsion
         float dSquare = dot(diff, diff);
         if (dSquare > 0.0) {
-          float factor = u_scalingRatio * nodeMass * otherNodeMass / dSquare;
-          dx += diff.x * factor;
-          dy += diff.y * factor;
+          factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
         }
       #endif
+
+      dx += diff.x * factor;
+      dy += diff.y * factor;
     }
   }
 
   // GRAVITY:
   float distanceToCenter = sqrt(x * x + y * y);
   float gravityFactor = 0.0;
+  float gravityCoefficient = u_scalingRatio;
+  float g = u_gravity / u_scalingRatio;
   #ifdef STRONG_GRAVITY_MODE
-    gravityFactor = u_gravity * nodeMass;
+    if (distanceToCenter > 0.0) gravityFactor = gravityCoefficient * nodeMass * g;
   #else
-    if (distanceToCenter > 0.0) gravityFactor = u_gravity * nodeMass / distanceToCenter;
+    if (distanceToCenter > 0.0) gravityFactor = gravityCoefficient * nodeMass * g / distanceToCenter;
   #endif
 
   dx -= x * gravityFactor;
@@ -140,7 +144,10 @@ void main() {
     vec2 edgeData = readTexture(u_edgesTexture, j + edgesOffset, EDGES_TEXTURE_SIZE).xy;
     float otherNodeIndex = edgeData.x;
     float weight = edgeData.y;
+    float edgeWeightInfluence = pow(weight, u_edgeWeightInfluence);
+
     vec4 otherNodePosition = readTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
+
     vec2 diff = nodePosition.xy - otherNodePosition.xy;
 
     #ifdef ADJUST_SIZES
@@ -150,8 +157,6 @@ void main() {
     #else
       float d = sqrt(dot(diff, diff));
     #endif
-
-    float edgeWeightInfluence = pow(weight, u_edgeWeightInfluence);
 
     float attractionFactor = 0.0;
     #ifdef LINLOG_MODE
@@ -210,16 +215,16 @@ void main() {
   ) / 2.0;
 
   #ifdef ADJUST_SIZES
-  float nodeSpeed = (0.1 * log(1.0 + traction)) * swingingFactor;
-  // No convergence when adjustSizes is true
+    float nodeSpeed = (0.1 * log(1.0 + traction)) * swingingFactor;
+    // No convergence when adjustSizes is true
 
   #else
-  float nodeSpeed = (nodeConvergence * log(1.0 + traction)) * swingingFactor;
-  // Store new node convergence:
-  gl_FragColor.z = min(
-    1.0,
-    sqrt(nodeSpeed * forceSquared * swingingFactor)
-  );
+    float nodeSpeed = (nodeConvergence * log(1.0 + traction)) * swingingFactor;
+    // Store new node convergence:
+    gl_FragColor.z = min(
+      1.0,
+      sqrt(nodeSpeed * forceSquared * swingingFactor)
+    );
   #endif
 
   gl_FragColor.x = x + dx * nodeSpeed / u_slowDown;
