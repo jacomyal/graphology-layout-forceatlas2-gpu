@@ -2,65 +2,57 @@ import Graph from "graphology";
 import { Attributes } from "graphology-types";
 
 import {
+  DATA_TEXTURES,
+  DATA_TEXTURES_FORMATS,
+  DATA_TEXTURES_LEVELS,
+  DATA_TEXTURES_SPECS,
   DEFAULT_FORCE_ATLAS_2_RUN_OPTIONS,
   DEFAULT_FORCE_ATLAS_2_SETTINGS,
-  EDGES_ATTRIBUTES_IN_TEXTURE,
   ForceAtlas2RunOptions,
   ForceAtlas2Settings,
-  NODES_ATTRIBUTES_IN_METADATA_TEXTURE,
-  NODES_ATTRIBUTES_IN_POSITION_TEXTURE,
-  TEXTURES_NAMES,
+  TextureName,
   UNIFORM_SETTINGS,
 } from "./consts";
 import { getFragmentShader } from "./shader-fragment";
 import { getVertexShader } from "./shader-vertex";
+import { getTextureSize } from "./utils";
 
 export class ForceAtlas2GPU<
   NodeAttributes extends Attributes = Attributes,
   EdgeAttributes extends Attributes = Attributes,
 > {
   private isRunning = false;
-
   private graph: Graph<NodeAttributes, EdgeAttributes>;
   private params: ForceAtlas2Settings;
+  private nodeDataCache: Record<
+    string,
+    {
+      index: number;
+      convergence: number;
+      mass: number;
+    }
+  >;
 
   // WebGL:
   private canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext;
   private program: WebGLProgram;
-  // This texture contains 4 (NODES_ATTRIBUTES_IN_POSITION_TEXTURE) floats per node:
-  // - x and y: The position of the node
-  // - dx and dy: The speed of the node
-  private nodesPositionTexture: WebGLTexture;
-  // The nodes texture contains 3 (NODES_ATTRIBUTES_IN_METADATA_TEXTURE) floats per node:
-  // - edgesOffset: An "integer" pointing at the position of the first of the node neighbors, in the edgesTexture
-  // - edgesCount: An "integer" counting the number of this node neighbors
-  // - convergence: An internal score that allows slowing nodes on some circumstances
-  // - mass: An internal score that increases for more connected nodes
-  private nodesMetadataTexture: WebGLTexture;
-  // The edges texture indexes each edge in both directions, since each edge impacts both extremities.
-  // The edges are grouped by source node.
-  // The edges texture contains 2 (EDGES_ATTRIBUTES_IN_TEXTURE) floats per connection:
-  // - target: The edge target index (as an "integer") in nodesTexture
-  // - weight: The edge weight
-  private edgesTexture: WebGLTexture;
 
+  // Program input data
+  private dataTextures: Record<TextureName, WebGLTexture>;
+  private dataArrays: Record<TextureName, Float32Array>;
   private maxNeighborsCount: number;
-  private nodeIndices: Record<string, number>;
-  private nodeConvergences: Record<string, number>;
-  private nodeMasses: Record<string, number>;
-  private nodesPositionDataArray: Float32Array;
-  private nodesMetadataDataArray: Float32Array;
-  private edgesDataArray: Float32Array;
 
-  private outputTexture: WebGLTexture;
-  private framebuffer: WebGLFramebuffer;
-  private uniformLocations: Record<string, WebGLUniformLocation>;
-
+  // Program input attributes and uniforms
   private positionLocation: number;
   private positionBuffer: WebGLBuffer;
   private textureCoordLocation: number;
   private textureCoordBuffer: WebGLBuffer;
+  private uniformLocations: Record<string, WebGLUniformLocation>;
+
+  // Program output
+  private outputTexture: WebGLTexture;
+  private framebuffer: WebGLFramebuffer;
 
   constructor(graph: Graph<NodeAttributes, EdgeAttributes>, params: Partial<ForceAtlas2Settings> = {}) {
     // Initialize data:
@@ -70,8 +62,7 @@ export class ForceAtlas2GPU<
       ...params,
     };
 
-    this.nodeConvergences = {};
-    this.nodeMasses = {};
+    this.nodeDataCache = {};
 
     // Initialize WebGL2 context and textures:
     this.canvas = document.createElement("canvas");
@@ -141,9 +132,10 @@ export class ForceAtlas2GPU<
     const gl = this.gl;
 
     const fragmentShaderSource = getFragmentShader({
-      nodesCount: this.graph.order,
-      edgesCount: this.graph.size,
+      graph: this.graph,
       maxNeighborsCount: this.maxNeighborsCount,
+      strongGravityMode: this.params.strongGravityMode,
+      linLogMode: this.params.linLogMode,
     });
     const vertexShaderSource = getVertexShader();
 
@@ -167,8 +159,10 @@ export class ForceAtlas2GPU<
     UNIFORM_SETTINGS.forEach((setting) => {
       this.uniformLocations[setting] = gl.getUniformLocation(this.program, `u_${setting}`);
     });
-    TEXTURES_NAMES.forEach((textureName, index) => {
-      this.uniformLocations[textureName] = gl.getUniformLocation(this.program, `u_${textureName}`);
+
+    this.dataTextures = {} as typeof this.dataTextures;
+    DATA_TEXTURES.forEach((textureName, index) => {
+      this.uniformLocations[textureName] = gl.getUniformLocation(this.program, `u_${textureName}Texture`);
       const texture = gl.createTexture();
       gl.activeTexture(gl.TEXTURE0 + index);
       gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -178,13 +172,13 @@ export class ForceAtlas2GPU<
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.uniform1i(this.uniformLocations[textureName], index);
 
-      (this[textureName] as WebGLTexture) = texture;
+      this.dataTextures[textureName] = texture;
     });
 
     // Activate the output texture
-    gl.activeTexture(gl.TEXTURE0 + TEXTURES_NAMES.length);
+    gl.activeTexture(gl.TEXTURE0 + DATA_TEXTURES.length);
     gl.bindTexture(gl.TEXTURE_2D, this.outputTexture);
-    gl.uniform1i(gl.getUniformLocation(this.program, "u_outputTexture"), TEXTURES_NAMES.length);
+    gl.uniform1i(gl.getUniformLocation(this.program, "u_outputTexture"), DATA_TEXTURES.length);
 
     this.positionLocation = gl.getAttribLocation(this.program, "a_position");
     this.textureCoordLocation = gl.getAttribLocation(this.program, "a_textureCoord");
@@ -228,74 +222,93 @@ export class ForceAtlas2GPU<
   private refreshTextures() {
     const { gl, graph } = this;
 
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.nodesPositionTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, graph.order, 1, 0, gl.RGBA, gl.FLOAT, this.nodesPositionDataArray);
-    gl.activeTexture(gl.TEXTURE0 + 1);
-    gl.bindTexture(gl.TEXTURE_2D, this.nodesMetadataTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, graph.order, 1, 0, gl.RGBA, gl.FLOAT, this.nodesMetadataDataArray);
-    gl.activeTexture(gl.TEXTURE0 + 2);
-    gl.bindTexture(gl.TEXTURE_2D, this.edgesTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, graph.size * 2, 1, 0, gl.RG, gl.FLOAT, this.edgesDataArray);
+    DATA_TEXTURES.forEach((textureName, i) => {
+      const { attributesPerItem, getItemsCount } = DATA_TEXTURES_SPECS[textureName];
+      const itemsCount = getItemsCount(graph);
+      const textureSize = getTextureSize(itemsCount);
+
+      gl.activeTexture(gl.TEXTURE0 + i);
+      gl.bindTexture(gl.TEXTURE_2D, this.dataTextures[textureName]);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        DATA_TEXTURES_LEVELS[attributesPerItem],
+        textureSize,
+        textureSize,
+        0,
+        DATA_TEXTURES_FORMATS[attributesPerItem],
+        gl.FLOAT,
+        this.dataArrays[textureName],
+      );
+    });
   }
 
   private refreshTexturesData() {
     const { graph } = this;
 
-    this.nodesPositionDataArray = new Float32Array(graph.order * NODES_ATTRIBUTES_IN_POSITION_TEXTURE);
-    this.nodesMetadataDataArray = new Float32Array(graph.order * NODES_ATTRIBUTES_IN_METADATA_TEXTURE);
-    this.edgesDataArray = new Float32Array(graph.size * 2 * EDGES_ATTRIBUTES_IN_TEXTURE);
+    this.dataArrays = {} as typeof this.dataArrays;
+    DATA_TEXTURES.forEach((textureName) => {
+      const { attributesPerItem, getItemsCount } = DATA_TEXTURES_SPECS[textureName];
+
+      const textureSize = getTextureSize(getItemsCount(graph));
+      this.dataArrays[textureName] = new Float32Array(textureSize ** 2 * attributesPerItem);
+    });
     const neighborsPerSource: { weight: number; index: number }[][] = [];
 
     // Index nodes per order:
-    this.nodeIndices = {};
-    this.nodeMasses = {};
-    let i = 0;
-    graph.forEachNode((node) => {
-      this.nodeIndices[node] = i;
-      this.nodeMasses[node] = 1;
+    this.nodeDataCache = {};
+    graph.nodes().forEach((node, i) => {
+      this.nodeDataCache[node] = {
+        index: i,
+        mass: 1,
+        convergence: 1,
+      };
+
       neighborsPerSource[i] = [];
       i++;
     });
 
     // Index edges per sources and targets:
     graph.forEachEdge((_edge, { weight }: { weight: number }, source, target) => {
-      const sourceIndex = this.nodeIndices[source];
-      const targetIndex = this.nodeIndices[target];
+      const sourceIndex = this.nodeDataCache[source].index;
+      const targetIndex = this.nodeDataCache[target].index;
 
       neighborsPerSource[sourceIndex].push({ weight, index: targetIndex });
       neighborsPerSource[targetIndex].push({ weight, index: sourceIndex });
-      this.nodeMasses[source] += weight;
-      this.nodeMasses[target] += weight;
+      this.nodeDataCache[source].mass += weight;
+      this.nodeDataCache[target].mass += weight;
     });
 
     // Feed the textures:
     let k = 0;
     let edgeIndex = 0;
     this.maxNeighborsCount = 0;
-    graph.forEachNode((node, { x, y }: { x: number; y: number }) => {
-      const nodeIndex = this.nodeIndices[node];
-      const neighbors = neighborsPerSource[nodeIndex];
+    graph.forEachNode((node, { x, y, size }: { x: number; y: number; size: number }) => {
+      const { index, mass, convergence } = this.nodeDataCache[node];
+      const neighbors = neighborsPerSource[index];
       const neighborsCount = neighbors.length;
       this.maxNeighborsCount = Math.max(this.maxNeighborsCount, neighborsCount);
 
-      k = nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE;
-      this.nodesPositionDataArray[k++] = x;
-      this.nodesPositionDataArray[k++] = y;
-      this.nodesPositionDataArray[k++] = 0;
-      this.nodesPositionDataArray[k++] = 0;
+      k = index * DATA_TEXTURES_SPECS.nodesPosition.attributesPerItem;
+      this.dataArrays.nodesPosition[k++] = x;
+      this.dataArrays.nodesPosition[k++] = y;
+      this.dataArrays.nodesPosition[k++] = 0;
+      this.dataArrays.nodesPosition[k++] = 0;
 
-      k = nodeIndex * NODES_ATTRIBUTES_IN_METADATA_TEXTURE;
-      this.nodesMetadataDataArray[k++] = edgeIndex;
-      this.nodesMetadataDataArray[k++] = neighborsCount;
-      this.nodesMetadataDataArray[k++] = this.nodeConvergences[node] || 1;
-      this.nodesMetadataDataArray[k++] = this.nodeMasses[node] || 1;
+      k = index * DATA_TEXTURES_SPECS.nodesDimensions.attributesPerItem;
+      this.dataArrays.nodesDimensions[k++] = mass;
+      this.dataArrays.nodesDimensions[k++] = size;
+      this.dataArrays.nodesDimensions[k++] = convergence;
+
+      k = index * DATA_TEXTURES_SPECS.nodesEdgesPointers.attributesPerItem;
+      this.dataArrays.nodesEdgesPointers[k++] = edgeIndex;
+      this.dataArrays.nodesEdgesPointers[k++] = neighborsCount;
 
       for (let j = 0; j < neighborsCount; j++) {
         const { weight, index } = neighbors[j];
-        k = edgeIndex * EDGES_ATTRIBUTES_IN_TEXTURE;
-        this.edgesDataArray[k++] = index;
-        this.edgesDataArray[k++] = weight;
+        k = edgeIndex * DATA_TEXTURES_SPECS.edges.attributesPerItem;
+        this.dataArrays.edges[k++] = index;
+        this.dataArrays.edges[k++] = weight;
         edgeIndex++;
       }
     });
@@ -316,14 +329,15 @@ export class ForceAtlas2GPU<
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     graph.forEachNode((n, { x: oldX, y: oldY }) => {
-      const nodeIndex = this.nodeIndices[n];
-      const x = outputArr[4 * nodeIndex];
-      const y = outputArr[4 * nodeIndex + 1];
-      const convergence = outputArr[4 * nodeIndex + 2];
+      const { index } = this.nodeDataCache[n];
+      const x = outputArr[4 * index];
+      const y = outputArr[4 * index + 1];
+      const convergence = outputArr[4 * index + 2];
+
       const dx = x - oldX;
       const dy = y - oldY;
 
-      this.nodeConvergences[n] = convergence;
+      this.nodeDataCache[n].convergence = convergence;
 
       // Update graph:
       if (updateGraph)
@@ -333,14 +347,14 @@ export class ForceAtlas2GPU<
         });
 
       // Update textures data:
-      let k = nodeIndex * NODES_ATTRIBUTES_IN_POSITION_TEXTURE;
-      this.nodesPositionDataArray[k++] = x;
-      this.nodesPositionDataArray[k++] = y;
-      this.nodesPositionDataArray[k++] = dx;
-      this.nodesPositionDataArray[k++] = dy;
+      let k = index * DATA_TEXTURES_SPECS.nodesPosition.attributesPerItem;
+      this.dataArrays.nodesPosition[k++] = x;
+      this.dataArrays.nodesPosition[k++] = y;
+      this.dataArrays.nodesPosition[k++] = dx;
+      this.dataArrays.nodesPosition[k++] = dy;
 
-      k = nodeIndex * NODES_ATTRIBUTES_IN_METADATA_TEXTURE;
-      this.nodesMetadataDataArray[k + 2] = convergence;
+      k = index * DATA_TEXTURES_SPECS.nodesDimensions.attributesPerItem;
+      this.dataArrays.nodesDimensions[k + 2] = convergence;
     });
 
     this.refreshTextures();
@@ -365,9 +379,10 @@ export class ForceAtlas2GPU<
     const { gl } = this;
 
     if (this.program) gl.deleteProgram(this.program);
-    if (this.nodesPositionTexture) gl.deleteTexture(this.nodesPositionTexture);
-    if (this.nodesMetadataTexture) gl.deleteTexture(this.nodesMetadataTexture);
-    if (this.edgesTexture) gl.deleteTexture(this.edgesTexture);
+    DATA_TEXTURES.forEach((textureName) => {
+      if (this.dataTextures[textureName]) gl.deleteTexture(this.dataTextures[textureName]);
+    });
+
     if (this.outputTexture) gl.deleteTexture(this.outputTexture);
 
     const extension = gl.getExtension("WEBGL_lose_context");
@@ -399,9 +414,9 @@ export class ForceAtlas2GPU<
     }
 
     // Set active texture for the output texture
-    gl.activeTexture(gl.TEXTURE0 + TEXTURES_NAMES.length);
+    gl.activeTexture(gl.TEXTURE0 + DATA_TEXTURES.length);
     gl.bindTexture(gl.TEXTURE_2D, this.outputTexture);
-    gl.uniform1i(gl.getUniformLocation(this.program, "u_outputTexture"), TEXTURES_NAMES.length);
+    gl.uniform1i(gl.getUniformLocation(this.program, "u_outputTexture"), DATA_TEXTURES.length);
 
     // Enable vertex attributes
     this.enableVertexAttributes();

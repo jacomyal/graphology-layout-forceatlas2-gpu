@@ -19,6 +19,8 @@ async function init() {
   const _renderer = new Sigma(graph, container);
 
   fa2.start({ iterationsPerStep: 1 });
+
+  return "FA2 was initialized properly";
 }
 
 init().then(console.log).catch(console.error);
