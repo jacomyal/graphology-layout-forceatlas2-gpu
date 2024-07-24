@@ -41,28 +41,26 @@ export type ForceAtlas2Settings = {
   linLogMode: boolean;
   adjustSizes: boolean;
   strongGravityMode: boolean;
+  outboundAttractionDistribution: boolean;
+
   edgeWeightInfluence: number;
   scalingRatio: number;
   gravity: number;
   slowDown: number;
   maxForce: number;
-
-  // Not implemented yet:
-  // outboundAttractionDistribution: boolean;
 };
 
 export const DEFAULT_FORCE_ATLAS_2_SETTINGS: ForceAtlas2Settings = {
   linLogMode: false,
   adjustSizes: false,
   strongGravityMode: false,
+  outboundAttractionDistribution: false,
+
   edgeWeightInfluence: 1,
   scalingRatio: 1,
   gravity: 1,
   slowDown: 1,
   maxForce: 10,
-
-  // Not implemented yet:
-  // outboundAttractionDistribution: false,
 };
 
 export const UNIFORM_SETTINGS: (keyof ForceAtlas2Settings)[] = [

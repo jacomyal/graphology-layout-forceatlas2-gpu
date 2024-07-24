@@ -8,12 +8,14 @@ export function getFragmentShader({
   strongGravityMode,
   linLogMode,
   adjustSizes,
+  outboundAttractionDistribution,
 }: {
   graph: Graph;
   maxNeighborsCount: number;
   strongGravityMode?: boolean;
   linLogMode?: boolean;
   adjustSizes?: boolean;
+  outboundAttractionDistribution?: boolean;
 }) {
   // language=GLSL
   const SHADER = /*glsl*/ `
@@ -28,6 +30,7 @@ precision highp float;
 ${linLogMode ? "#define LINLOG_MODE" : ""}
 ${adjustSizes ? "#define ADJUST_SIZES" : ""}
 ${strongGravityMode ? "#define STRONG_GRAVITY_MODE" : ""}
+${outboundAttractionDistribution ? "#define OUTBOUND_ATTRACTION_DISTRIBUTION" : ""}
 
 // Textures management:
 uniform sampler2D u_nodesPositionTexture;
@@ -42,6 +45,10 @@ uniform float u_scalingRatio;
 uniform float u_gravity;
 uniform float u_maxForce;
 uniform float u_slowDown;
+
+#ifdef OUTBOUND_ATTRACTION_DISTRIBUTION
+  uniform float u_outboundAttCompensation;
+#endif
 
 vec4 readTexture(sampler2D texture, float index, float textureSize) {
   float row = floor(index / textureSize);
@@ -75,35 +82,35 @@ void main() {
   vec2 nodeEdgesPointers = readTexture(u_nodesEdgesPointersTexture, nodeIndex, NODES_TEXTURE_SIZE).xy;
   float edgesOffset = nodeEdgesPointers.r;
   float neighborsCount = nodeEdgesPointers.g;
-  
+
   // REPULSION:
   for (float j = 0.0; j < NODES_COUNT; j++) {
     if (j != nodeIndex) {
       vec4 otherNodePosition = readTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
       vec3 otherNodeDimensions = readTexture(u_nodesDimensionsTexture, j, NODES_TEXTURE_SIZE).rgb;
-    
+
       float otherNodeMass = otherNodeDimensions.r;
       float otherNodeSize = otherNodeDimensions.g;
       vec2 diff = nodePosition.xy - otherNodePosition.xy;
 
       #ifdef ADJUST_SIZES
-      float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
-      float factor;
-      if (d > 0.0) {
-        factor = u_scalingRatio * nodeMass * otherNodeMass / (d * d);
-      } else {
-        factor = 100.0 * u_scalingRatio * nodeMass * otherNodeMass;
-      }
-      dx += diff.x * factor;
-      dy += diff.y * factor;
-      
-      #else
-      float dSquare = dot(diff, diff);
-      if (dSquare > 0.0) {
-        float factor = u_scalingRatio * nodeMass * otherNodeMass / dSquare;
+        float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
+        float factor;
+        if (d > 0.0) {
+          factor = u_scalingRatio * nodeMass * otherNodeMass / (d * d);
+        } else {
+          factor = 100.0 * u_scalingRatio * nodeMass * otherNodeMass;
+        }
         dx += diff.x * factor;
         dy += diff.y * factor;
-      }
+
+      #else
+        float dSquare = dot(diff, diff);
+        if (dSquare > 0.0) {
+          float factor = u_scalingRatio * nodeMass * otherNodeMass / dSquare;
+          dx += diff.x * factor;
+          dy += diff.y * factor;
+        }
       #endif
     }
   }
@@ -112,15 +119,21 @@ void main() {
   float distanceToCenter = sqrt(x * x + y * y);
   float gravityFactor = 0.0;
   #ifdef STRONG_GRAVITY_MODE
-  gravityFactor = u_gravity * nodeMass;
+    gravityFactor = u_gravity * nodeMass;
   #else
-  if (distanceToCenter > 0.0) gravityFactor = u_gravity * nodeMass / distanceToCenter;
+    if (distanceToCenter > 0.0) gravityFactor = u_gravity * nodeMass / distanceToCenter;
   #endif
 
   dx -= x * gravityFactor;
   dy -= y * gravityFactor;
 
   // ATTRACTION:
+  #ifdef OUTBOUND_ATTRACTION_DISTRIBUTION
+    float attractionCoefficient = u_outboundAttCompensation;
+  #else
+    float attractionCoefficient = 1.0;
+  #endif
+
   for (float j = 0.0; j < MAX_NEIGHBORS_COUNT; j++) {
     if (j >= neighborsCount) break;
 
@@ -129,26 +142,47 @@ void main() {
     float weight = edgeData.y;
     vec4 otherNodePosition = readTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
     vec2 diff = nodePosition.xy - otherNodePosition.xy;
-    
+
     #ifdef ADJUST_SIZES
-    vec4 otherNodeDimensions = readTexture(u_nodesDimensionsTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
-    float otherNodeSize = otherNodeDimensions.g;
-    float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
+      vec4 otherNodeDimensions = readTexture(u_nodesDimensionsTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
+      float otherNodeSize = otherNodeDimensions.g;
+      float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
     #else
-    float d = sqrt(dot(diff, diff));
+      float d = sqrt(dot(diff, diff));
     #endif
-    
+
     float edgeWeightInfluence = pow(weight, u_edgeWeightInfluence);
 
     float attractionFactor = 0.0;
     #ifdef LINLOG_MODE
-    // LinLog Degree Distributed Anti-collision Attraction
-    if (d > 0.0) {
-      attractionFactor = (-edgeWeightInfluence * log(1 + d)) / d;
-    }
+      #ifdef OUTBOUND_ATTRACTION_DISTRIBUTION
+        // LinLog Degree Distributed Anti-collision Attraction
+        if (d > 0.0) {
+          attractionFactor = (-attractionCoefficient * edgeWeightInfluence * log(1 + d)) / d / nodeMass;
+        }
+
+      #else
+        // LinLog Anti-collision Attraction
+        if (d > 0.0) {
+          attractionFactor = (-attractionCoefficient * edgeWeightInfluence * log(1 + d)) / d;
+        }
+      #endif
+
     #else
-    // Linear Degree Distributed Anti-collision Attraction
-    attractionFactor = -edgeWeightInfluence;
+      #ifdef ADJUST_SIZES
+      #else
+        // NOTE: Distance is set to 1 to override next condition
+        d = 1.0;
+      #endif
+
+      #ifdef OUTBOUND_ATTRACTION_DISTRIBUTION
+        // Linear Degree Distributed Anti-collision Attraction
+        attractionFactor = -(attractionCoefficient * edgeWeightInfluence) / nodeMass;
+
+      #else
+        // Linear Anti-collision Attraction
+        attractionFactor = -attractionCoefficient * edgeWeightInfluence;
+      #endif
     #endif
 
     if (d > 0.0) {
@@ -156,7 +190,7 @@ void main() {
       dy += diff.y * attractionFactor;
     }
   }
-  
+
   // APPLY FORCES:
   float forceSquared = pow(dx, 2.0) + pow(dy, 2.0);
   float force = sqrt(forceSquared);
@@ -164,7 +198,7 @@ void main() {
     dx = dx * u_maxForce / force;
     dy = dy * u_maxForce / force;
   }
-  
+
   float swinging = nodeMass * sqrt(
     pow(oldDx - dx, 2.0)
     + pow(oldDy - dy, 2.0)
@@ -174,7 +208,7 @@ void main() {
     pow(oldDx + dx, 2.0)
     + pow(oldDy + dy, 2.0)
   ) / 2.0;
-  
+
   #ifdef ADJUST_SIZES
   float nodeSpeed = (0.1 * log(1.0 + traction)) * swingingFactor;
   // No convergence when adjustSizes is true

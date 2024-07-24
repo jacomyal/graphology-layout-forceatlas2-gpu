@@ -42,6 +42,7 @@ export class ForceAtlas2GPU<
   private dataTextures: Record<TextureName, WebGLTexture>;
   private dataArrays: Record<TextureName, Float32Array>;
   private maxNeighborsCount: number;
+  private outboundAttCompensation: number;
 
   // Program input attributes and uniforms
   private positionLocation: number;
@@ -137,6 +138,7 @@ export class ForceAtlas2GPU<
       strongGravityMode: this.params.strongGravityMode,
       linLogMode: this.params.linLogMode,
       adjustSizes: this.params.adjustSizes,
+      outboundAttractionDistribution: this.params.outboundAttractionDistribution,
     });
     const vertexShaderSource = getVertexShader();
 
@@ -157,6 +159,7 @@ export class ForceAtlas2GPU<
 
     // Bind all required uniforms (example, adapt based on actual shader code):
     this.uniformLocations = {};
+    this.uniformLocations.outboundAttCompensation = gl.getUniformLocation(this.program, `u_outboundAttCompensation`);
     UNIFORM_SETTINGS.forEach((setting) => {
       this.uniformLocations[setting] = gl.getUniformLocation(this.program, `u_${setting}`);
     });
@@ -284,6 +287,7 @@ export class ForceAtlas2GPU<
     let k = 0;
     let edgeIndex = 0;
     this.maxNeighborsCount = 0;
+    this.outboundAttCompensation = 0;
     graph.forEachNode((node, { x, y, size }: { x: number; y: number; size: number }) => {
       const { index, mass, convergence } = this.nodeDataCache[node];
       const neighbors = neighborsPerSource[index];
@@ -300,6 +304,7 @@ export class ForceAtlas2GPU<
       this.dataArrays.nodesDimensions[k++] = mass;
       this.dataArrays.nodesDimensions[k++] = size;
       this.dataArrays.nodesDimensions[k++] = convergence;
+      this.outboundAttCompensation += mass;
 
       k = index * DATA_TEXTURES_SPECS.nodesEdgesPointers.attributesPerItem;
       this.dataArrays.nodesEdgesPointers[k++] = edgeIndex;
@@ -313,6 +318,8 @@ export class ForceAtlas2GPU<
         edgeIndex++;
       }
     });
+
+    this.outboundAttCompensation /= graph.order / 10;
   }
 
   private readOutput(updateGraph?: boolean) {
@@ -396,6 +403,7 @@ export class ForceAtlas2GPU<
 
   private setUniforms() {
     const { gl } = this;
+    gl.uniform1f(this.uniformLocations.outboundAttCompensation, this.outboundAttCompensation);
     UNIFORM_SETTINGS.forEach((setting: keyof ForceAtlas2Settings) => {
       gl.uniform1f(this.uniformLocations[setting], this.params[setting] as number);
     });
