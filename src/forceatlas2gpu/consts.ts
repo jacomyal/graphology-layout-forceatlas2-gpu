@@ -41,9 +41,9 @@ export const UNIFORM_SETTINGS: (keyof ForceAtlas2Settings)[] = [
 export const TEXTURES_NAMES = ["nodesPositionTexture", "nodesMetadataTexture", "edgesTexture"];
 
 export type ForceAtlas2RunOptions = {
-  iterations: number;
+  iterationsPerStep: number;
 };
 
 export const DEFAULT_FORCE_ATLAS_2_RUN_OPTIONS: ForceAtlas2RunOptions = {
-  iterations: 1,
+  iterationsPerStep: 1,
 };

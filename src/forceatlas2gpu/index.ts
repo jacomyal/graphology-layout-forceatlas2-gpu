@@ -19,6 +19,8 @@ export class ForceAtlas2GPU<
   NodeAttributes extends Attributes = Attributes,
   EdgeAttributes extends Attributes = Attributes,
 > {
+  private isRunning = false;
+
   private graph: Graph<NodeAttributes, EdgeAttributes>;
   private params: ForceAtlas2Settings;
 
@@ -411,25 +413,39 @@ export class ForceAtlas2GPU<
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
+  private step(iterations = 1) {
+    let iterationsLeft = iterations;
+    if (!this.isRunning) return;
+
+    while (iterationsLeft-- > 0) {
+      this.runProgram();
+      if (iterationsLeft > 0) this.readOutput(false);
+    }
+    this.readOutput(true);
+
+    requestAnimationFrame(() => this.step(iterations));
+  }
+
   /**
    * Public API:
    * ***********
    */
-  public run(opts: Partial<ForceAtlas2RunOptions> = {}) {
-    const options: ForceAtlas2RunOptions = {
+  public start(opts: Partial<ForceAtlas2RunOptions> = {}) {
+    const { iterationsPerStep }: ForceAtlas2RunOptions = {
       ...DEFAULT_FORCE_ATLAS_2_RUN_OPTIONS,
       ...opts,
     };
-    let iterationsLeft = options.iterations;
 
     this.checkGraph();
     this.setUniforms();
     this.refreshTexturesData();
     this.refreshTextures();
-    while (iterationsLeft-- > 0) {
-      this.runProgram();
-      if (iterationsLeft) this.readOutput(false);
-    }
-    this.readOutput(true);
+
+    this.isRunning = true;
+    this.step(iterationsPerStep);
+  }
+
+  public stop() {
+    this.isRunning = false;
   }
 }
