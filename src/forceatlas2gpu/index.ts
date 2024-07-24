@@ -136,6 +136,7 @@ export class ForceAtlas2GPU<
       maxNeighborsCount: this.maxNeighborsCount,
       strongGravityMode: this.params.strongGravityMode,
       linLogMode: this.params.linLogMode,
+      adjustSizes: this.params.adjustSizes,
     });
     const vertexShaderSource = getVertexShader();
 

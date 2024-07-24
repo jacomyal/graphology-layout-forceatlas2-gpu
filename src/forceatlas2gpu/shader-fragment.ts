@@ -7,11 +7,13 @@ export function getFragmentShader({
   maxNeighborsCount,
   strongGravityMode,
   linLogMode,
+  adjustSizes,
 }: {
   graph: Graph;
   maxNeighborsCount: number;
   strongGravityMode?: boolean;
   linLogMode?: boolean;
+  adjustSizes?: boolean;
 }) {
   // language=GLSL
   const SHADER = /*glsl*/ `
@@ -22,8 +24,9 @@ precision highp float;
 #define EDGES_COUNT ${numberToGLSLFloat(graph.size)}
 #define MAX_NEIGHBORS_COUNT ${numberToGLSLFloat(maxNeighborsCount)}
 #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.order))}
-#define EDGES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.size))}
+#define EDGES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.size * 2))}
 ${linLogMode ? "#define LINLOG_MODE" : ""}
+${adjustSizes ? "#define ADJUST_SIZES" : ""}
 ${strongGravityMode ? "#define STRONG_GRAVITY_MODE" : ""}
 
 // Textures management:
@@ -80,14 +83,28 @@ void main() {
       vec3 otherNodeDimensions = readTexture(u_nodesDimensionsTexture, j, NODES_TEXTURE_SIZE).rgb;
     
       float otherNodeMass = otherNodeDimensions.r;
+      float otherNodeSize = otherNodeDimensions.g;
       vec2 diff = nodePosition.xy - otherNodePosition.xy;
-      float dSquare = dot(diff, diff);
 
+      #ifdef ADJUST_SIZES
+      float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
+      float factor;
+      if (d > 0.0) {
+        factor = u_scalingRatio * nodeMass * otherNodeMass / (d * d);
+      } else {
+        factor = 100.0 * u_scalingRatio * nodeMass * otherNodeMass;
+      }
+      dx += diff.x * factor;
+      dy += diff.y * factor;
+      
+      #else
+      float dSquare = dot(diff, diff);
       if (dSquare > 0.0) {
         float factor = u_scalingRatio * nodeMass * otherNodeMass / dSquare;
         dx += diff.x * factor;
         dy += diff.y * factor;
       }
+      #endif
     }
   }
 
@@ -111,9 +128,16 @@ void main() {
     float otherNodeIndex = edgeData.x;
     float weight = edgeData.y;
     vec4 otherNodePosition = readTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
-
     vec2 diff = nodePosition.xy - otherNodePosition.xy;
+    
+    #ifdef ADJUST_SIZES
+    vec4 otherNodeDimensions = readTexture(u_nodesDimensionsTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
+    float otherNodeSize = otherNodeDimensions.g;
+    float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
+    #else
     float d = sqrt(dot(diff, diff));
+    #endif
+    
     float edgeWeightInfluence = pow(weight, u_edgeWeightInfluence);
 
     float attractionFactor = 0.0;
@@ -140,7 +164,7 @@ void main() {
     dx = dx * u_maxForce / force;
     dy = dy * u_maxForce / force;
   }
-
+  
   float swinging = nodeMass * sqrt(
     pow(oldDx - dx, 2.0)
     + pow(oldDy - dy, 2.0)
@@ -150,16 +174,22 @@ void main() {
     pow(oldDx + dx, 2.0)
     + pow(oldDy + dy, 2.0)
   ) / 2.0;
-  float nodeSpeed = (nodeConvergence * log(1.0 + traction)) * swingingFactor;
-
-  gl_FragColor.x = x + dx * nodeSpeed / u_slowDown;
-  gl_FragColor.y = y + dy * nodeSpeed / u_slowDown;
   
+  #ifdef ADJUST_SIZES
+  float nodeSpeed = (0.1 * log(1.0 + traction)) * swingingFactor;
+  // No convergence when adjustSizes is true
+
+  #else
+  float nodeSpeed = (nodeConvergence * log(1.0 + traction)) * swingingFactor;
   // Store new node convergence:
   gl_FragColor.z = min(
     1.0,
     sqrt(nodeSpeed * forceSquared * swingingFactor)
   );
+  #endif
+
+  gl_FragColor.x = x + dx * nodeSpeed / u_slowDown;
+  gl_FragColor.y = y + dy * nodeSpeed / u_slowDown;
 }`;
 
   return SHADER;

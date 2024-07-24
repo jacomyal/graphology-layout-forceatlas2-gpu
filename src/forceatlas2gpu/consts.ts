@@ -39,6 +39,7 @@ export const DATA_TEXTURES_FORMATS = {
 
 export type ForceAtlas2Settings = {
   linLogMode: boolean;
+  adjustSizes: boolean;
   strongGravityMode: boolean;
   edgeWeightInfluence: number;
   scalingRatio: number;
@@ -47,12 +48,12 @@ export type ForceAtlas2Settings = {
   maxForce: number;
 
   // Not implemented yet:
-  // adjustSizes: boolean;
   // outboundAttractionDistribution: boolean;
 };
 
 export const DEFAULT_FORCE_ATLAS_2_SETTINGS: ForceAtlas2Settings = {
   linLogMode: false,
+  adjustSizes: false,
   strongGravityMode: false,
   edgeWeightInfluence: 1,
   scalingRatio: 1,
@@ -61,7 +62,6 @@ export const DEFAULT_FORCE_ATLAS_2_SETTINGS: ForceAtlas2Settings = {
   maxForce: 10,
 
   // Not implemented yet:
-  // adjustSizes: false,
   // outboundAttractionDistribution: false,
 };
 
