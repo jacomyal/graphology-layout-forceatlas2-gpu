@@ -18,7 +18,7 @@ export function getFragmentShader({
   outboundAttractionDistribution?: boolean;
 }) {
   // language=GLSL
-  const SHADER = /*glsl*/ `
+  const SHADER = /*glsl*/ `#version 300 es
 precision highp float;
 
 #define EPSILON 0.01
@@ -37,7 +37,7 @@ uniform sampler2D u_nodesPositionTexture;
 uniform sampler2D u_nodesDimensionsTexture;
 uniform sampler2D u_nodesEdgesPointersTexture;
 uniform sampler2D u_edgesTexture;
-varying vec2 v_textureCoord;
+in vec2 v_textureCoord;
 
 // Settings management:
 uniform float u_edgeWeightInfluence;
@@ -50,11 +50,14 @@ uniform float u_slowDown;
   uniform float u_outboundAttCompensation;
 #endif
 
-vec4 readTexture(sampler2D texture, float index, float textureSize) {
+// Output
+out vec4 fragColor;
+
+vec4 getValueInTexture(sampler2D inputTexture, float index, float textureSize) {
   float row = floor(index / textureSize);
   float col = index - row * textureSize;
-  return texture2D(
-    texture,
+  return texture(
+  inputTexture,
     vec2(
       (col + 0.5) / textureSize,
       (row + 0.5) / textureSize
@@ -62,11 +65,17 @@ vec4 readTexture(sampler2D texture, float index, float textureSize) {
   );
 }
 
+float getIndex(vec2 positionInTexture, float textureSize) {
+  float col = floor(positionInTexture.x * textureSize);
+  float row = floor(positionInTexture.y * textureSize);
+  return row * textureSize + col;
+}
+
 void main() {
-  float nodeIndex = floor(v_textureCoord.s * NODES_COUNT - 0.5 + EPSILON);
+  float nodeIndex = getIndex(v_textureCoord, NODES_TEXTURE_SIZE);
   if (nodeIndex > NODES_COUNT) return;
 
-  vec4 nodePosition = readTexture(u_nodesPositionTexture, nodeIndex, NODES_TEXTURE_SIZE);
+  vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, nodeIndex, NODES_TEXTURE_SIZE);
   float x = nodePosition.x;
   float y = nodePosition.y;
   float oldDx = nodePosition.b;
@@ -74,12 +83,13 @@ void main() {
   float dx = 0.0;
   float dy = 0.0;
 
-  vec3 nodeDimensions = readTexture(u_nodesDimensionsTexture, nodeIndex, NODES_TEXTURE_SIZE).rgb;
+
+  vec3 nodeDimensions = getValueInTexture(u_nodesDimensionsTexture, nodeIndex, NODES_TEXTURE_SIZE).rgb;
   float nodeMass = nodeDimensions.r;
   float nodeSize = nodeDimensions.g;
   float nodeConvergence = nodeDimensions.b;
 
-  vec2 nodeEdgesPointers = readTexture(u_nodesEdgesPointersTexture, nodeIndex, NODES_TEXTURE_SIZE).xy;
+  vec2 nodeEdgesPointers = getValueInTexture(u_nodesEdgesPointersTexture, nodeIndex, NODES_TEXTURE_SIZE).xy;
   float edgesOffset = nodeEdgesPointers.r;
   float neighborsCount = nodeEdgesPointers.g;
 
@@ -87,8 +97,8 @@ void main() {
   float repulsionCoefficient = u_scalingRatio;
   for (float j = 0.0; j < NODES_COUNT; j++) {
     if (j != nodeIndex) {
-      vec4 otherNodePosition = readTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
-      vec3 otherNodeDimensions = readTexture(u_nodesDimensionsTexture, j, NODES_TEXTURE_SIZE).rgb;
+      vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
+      vec3 otherNodeDimensions = getValueInTexture(u_nodesDimensionsTexture, j, NODES_TEXTURE_SIZE).rgb;
       float otherNodeMass = otherNodeDimensions.r;
       float otherNodeSize = otherNodeDimensions.g;
 
@@ -141,17 +151,17 @@ void main() {
   for (float j = 0.0; j < MAX_NEIGHBORS_COUNT; j++) {
     if (j >= neighborsCount) break;
 
-    vec2 edgeData = readTexture(u_edgesTexture, j + edgesOffset, EDGES_TEXTURE_SIZE).xy;
+    vec2 edgeData = getValueInTexture(u_edgesTexture, j + edgesOffset, EDGES_TEXTURE_SIZE).xy;
     float otherNodeIndex = edgeData.x;
     float weight = edgeData.y;
     float edgeWeightInfluence = pow(weight, u_edgeWeightInfluence);
 
-    vec4 otherNodePosition = readTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
+    vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
 
     vec2 diff = nodePosition.xy - otherNodePosition.xy;
 
     #ifdef ADJUST_SIZES
-      vec4 otherNodeDimensions = readTexture(u_nodesDimensionsTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
+      vec4 otherNodeDimensions = getValueInTexture(u_nodesDimensionsTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
       float otherNodeSize = otherNodeDimensions.g;
       float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
     #else
@@ -221,14 +231,14 @@ void main() {
   #else
     float nodeSpeed = (nodeConvergence * log(1.0 + traction)) * swingingFactor;
     // Store new node convergence:
-    gl_FragColor.z = min(
+    fragColor.z = min(
       1.0,
       sqrt(nodeSpeed * forceSquared * swingingFactor)
     );
   #endif
 
-  gl_FragColor.x = x + dx * nodeSpeed / u_slowDown;
-  gl_FragColor.y = y + dy * nodeSpeed / u_slowDown;
+  fragColor.x = x + dx * nodeSpeed / u_slowDown;
+  fragColor.y = y + dy * nodeSpeed / u_slowDown;
 }`;
 
   return SHADER;

@@ -1,9 +1,9 @@
 import Graph from "graphology";
 import clusters from "graphology-generators/random/clusters";
-import circlepack from "graphology-layout/circlepack";
+import random from "graphology-layout/random";
 import Sigma from "sigma";
 
-import { ForceAtlas2GPU } from "../src/forceatlas2gpu";
+import { ForceAtlas2GPU } from "../src";
 
 async function init() {
   const PARAMS = {
@@ -13,8 +13,8 @@ async function init() {
   };
 
   const graph = clusters(Graph, PARAMS);
-  circlepack.assign(graph, {
-    hierarchyAttributes: ["cluster"],
+  random.assign(graph, {
+    scale: 1000,
   });
   const colors: Record<string, string> = {};
   for (let i = 0; i < +PARAMS.clusters; i++) {
@@ -35,10 +35,13 @@ async function init() {
     // scalingRatio: 10,
     // slowDown: 1 + Math.log(graph.order),
     // strongGravityMode: true,
-    // adjustSizes: false,
+    // adjustSizes: true,
     // outboundAttractionDistribution: false,
   });
-  const _renderer = new Sigma(graph, container);
+  const _renderer = new Sigma(graph, container, {
+    itemSizesReference: "positions",
+    zoomToSizeRatioFunction: (x) => x,
+  });
 
   fa2.start({ iterationsPerStep: 1 });
 

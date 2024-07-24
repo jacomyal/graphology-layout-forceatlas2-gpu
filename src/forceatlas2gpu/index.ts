@@ -69,9 +69,10 @@ export class ForceAtlas2GPU<
     this.nodeDataCache = {};
 
     // Initialize WebGL2 context and textures:
+    const canvasSize = getTextureSize(graph.order);
     this.canvas = document.createElement("canvas");
-    this.canvas.width = graph.order;
-    this.canvas.height = 1;
+    this.canvas.width = canvasSize;
+    this.canvas.height = canvasSize;
     const gl = this.canvas.getContext("webgl2");
     if (!gl) throw new Error("WebGL2 is not supported in this browser.");
     this.gl = gl;
@@ -88,7 +89,7 @@ export class ForceAtlas2GPU<
     // Create renderable texture
     this.outputTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.outputTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, graph.order, 1, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, canvasSize, canvasSize, 0, gl.RGBA, gl.FLOAT, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -201,14 +202,14 @@ export class ForceAtlas2GPU<
     this.positionBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
 
-    const positions = new Float32Array([-1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0]);
+    const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
 
     // Create a buffer for the texture coordinates.
     this.textureCoordBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.textureCoordBuffer);
 
-    const textureCoordinates = new Float32Array([0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+    const textureCoordinates = new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]);
     gl.bufferData(gl.ARRAY_BUFFER, textureCoordinates, gl.STATIC_DRAW);
   }
 
@@ -222,7 +223,7 @@ export class ForceAtlas2GPU<
 
     // Bind the texture coordinate buffer.
     gl.bindBuffer(gl.ARRAY_BUFFER, this.textureCoordBuffer);
-    gl.vertexAttribPointer(this.textureCoordLocation, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(this.textureCoordLocation, 2, gl.FLOAT, true, 0, 0);
     gl.enableVertexAttribArray(this.textureCoordLocation);
   }
 
@@ -322,19 +323,20 @@ export class ForceAtlas2GPU<
       }
     });
 
-    this.outboundAttCompensation /= graph.order / 10;
+    this.outboundAttCompensation /= graph.order;
   }
 
   private readOutput(updateGraph?: boolean) {
     const { gl, graph } = this;
     const nodesCount = graph.order;
-    const outputArr = new Float32Array(nodesCount * 4);
+    const textureSize = getTextureSize(nodesCount);
+    const outputArr = new Float32Array(textureSize * textureSize * 4);
 
     // Bind the framebuffer before reading pixels
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
 
     // Read from the renderable texture attached to the framebuffer
-    gl.readPixels(0, 0, nodesCount, 1, gl.RGBA, gl.FLOAT, outputArr);
+    gl.readPixels(0, 0, textureSize, textureSize, gl.RGBA, gl.FLOAT, outputArr);
 
     // Unbind the framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
