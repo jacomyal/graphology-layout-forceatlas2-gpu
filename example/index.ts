@@ -7,8 +7,8 @@ import { ForceAtlas2GPU } from "../src";
 
 async function init() {
   const PARAMS = {
-    order: 2000,
-    size: 10000,
+    order: 5000,
+    size: 50000,
     clusters: 3,
   };
 
@@ -31,6 +31,7 @@ async function init() {
 
   const container = document.getElementById("stage") as HTMLDivElement;
   const fa2 = new ForceAtlas2GPU(graph, {
+    // barnesHutOptimize: true
     // gravity: 0.05,
     // scalingRatio: 10,
     // slowDown: 1 + Math.log(graph.order),
@@ -43,7 +44,7 @@ async function init() {
     zoomToSizeRatioFunction: (x) => x,
   });
 
-  fa2.start({ iterationsPerStep: 1 });
+  fa2.start({ iterationsPerStep: 5 });
 
   return "FA2 was initialized properly";
 }

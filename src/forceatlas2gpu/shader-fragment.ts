@@ -1,22 +1,20 @@
 import Graph from "graphology";
 
+import { ForceAtlas2Flags, REGION_NODE } from "./consts";
 import { getTextureSize, numberToGLSLFloat } from "./utils";
 
 export function getFragmentShader({
   graph,
   maxNeighborsCount,
-  strongGravityMode,
   linLogMode,
   adjustSizes,
+  barnesHutOptimize,
+  strongGravityMode,
   outboundAttractionDistribution,
 }: {
   graph: Graph;
   maxNeighborsCount: number;
-  strongGravityMode?: boolean;
-  linLogMode?: boolean;
-  adjustSizes?: boolean;
-  outboundAttractionDistribution?: boolean;
-}) {
+} & ForceAtlas2Flags) {
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
 precision highp float;
@@ -27,8 +25,10 @@ precision highp float;
 #define MAX_NEIGHBORS_COUNT ${numberToGLSLFloat(maxNeighborsCount)}
 #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.order))}
 #define EDGES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.size * 2))}
+#define MAX_BARNES_HUT_REGIONS ${numberToGLSLFloat(Math.log(graph.order + 1))}
 ${linLogMode ? "#define LINLOG_MODE" : ""}
 ${adjustSizes ? "#define ADJUST_SIZES" : ""}
+${barnesHutOptimize ? "#define BARNES_HUT" : ""}
 ${strongGravityMode ? "#define STRONG_GRAVITY_MODE" : ""}
 ${outboundAttractionDistribution ? "#define OUTBOUND_ATTRACTION_DISTRIBUTION" : ""}
 
@@ -48,6 +48,12 @@ uniform float u_slowDown;
 
 #ifdef OUTBOUND_ATTRACTION_DISTRIBUTION
   uniform float u_outboundAttCompensation;
+#endif
+  
+#ifdef BARNES_HUT
+  uniform sampler2D u_regionsTexture;
+  uniform float u_regionsTextureSize;
+  uniform float u_barnesHutTheta;
 #endif
 
 // Output
@@ -82,8 +88,7 @@ void main() {
   float oldDy = nodePosition.a;
   float dx = 0.0;
   float dy = 0.0;
-
-
+  
   vec3 nodeDimensions = getValueInTexture(u_nodesDimensionsTexture, nodeIndex, NODES_TEXTURE_SIZE).rgb;
   float nodeMass = nodeDimensions.r;
   float nodeSize = nodeDimensions.g;
@@ -93,39 +98,118 @@ void main() {
   float edgesOffset = nodeEdgesPointers.r;
   float neighborsCount = nodeEdgesPointers.g;
 
+  #ifdef BARNES_HUT
+    float thetaSquared = pow(u_barnesHutTheta, 2.0);
+  #endif
+
   // REPULSION:
   float repulsionCoefficient = u_scalingRatio;
-  for (float j = 0.0; j < NODES_COUNT; j++) {
-    if (j != nodeIndex) {
-      vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
-      vec3 otherNodeDimensions = getValueInTexture(u_nodesDimensionsTexture, j, NODES_TEXTURE_SIZE).rgb;
-      float otherNodeMass = otherNodeDimensions.r;
-      float otherNodeSize = otherNodeDimensions.g;
+  #ifdef BARNES_HUT
+    float regionIndex = 0.0; // Starting with root region
+  
+    for (float j = 0.0; j < MAX_BARNES_HUT_REGIONS; j++) {
+      // Retrieve data from the regions texture:
+      vec3 regionData1 = getValueInTexture(u_regionsTexture, regionIndex * 3.0, u_regionsTextureSize).rgb;
+      float regionNodeIndex = regionData1.r;
+      
+      vec3 regionData2 = getValueInTexture(u_regionsTexture, regionIndex * 3.0 + 1.0, u_regionsTextureSize).rgb;
+      float regionSize = regionData2.r;
+      float regionNextSibling = regionData2.g;
+      float regionFirstChildIndex = regionData2.b;
+      
+      vec3 regionData3 = getValueInTexture(u_regionsTexture, regionIndex * 3.0 + 2.0, u_regionsTextureSize).rgb;
+      vec2 regionMassCenter = regionData3.xy;
+      float regionMass = regionData3.z;
 
-      vec2 diff = nodePosition.xy - otherNodePosition.xy;
-      float factor = 0.0;
+      // The region has sub-regions
+      if (regionFirstChildIndex >= 0.0) {
+        // We run the Barnes Hut test to see if we are at the right distance
+        vec2 diff = vec2(x, y) - regionMassCenter;
+        float d = sqrt(dot(diff, diff));
 
-      #ifdef ADJUST_SIZES
-        // Anticollision Linear Repulsion
-        float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
-        if (d > 0.0) {
-          factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
-        } else if (d < 0.0) {
-          factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
+        // We treat the region as a single body, and we repulse
+        if ((4.0 * regionSize * regionSize) / d < thetaSquared) {
+          if (d > 0.0) {
+            float factor = repulsionCoefficient * nodeMass * regionMass / d;
+            dx += diff.x * factor;
+            dy += diff.y * factor;
+          }
+
+          // When this is done, we iterate. We have to look at the next sibling.
+          regionIndex = regionNextSibling;
+          if (regionIndex <= 0.0) break; // No next sibling: we have finished the tree
         }
-
-      #else
-        // Linear Repulsion
-        float dSquare = dot(diff, diff);
-        if (dSquare > 0.0) {
-          factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
+        
+        // The region is too close and we have to look at sub-regions
+        else {
+          regionIndex = regionFirstChildIndex;
         }
-      #endif
+      }
 
-      dx += diff.x * factor;
-      dy += diff.y * factor;
+      // The region has no sub-region
+      // If there is a node r[0] and it is not n, then repulse
+      else {
+        if (regionNodeIndex >= 0.0 && regionNodeIndex != nodeIndex) {
+          vec4 regionNodePosition = getValueInTexture(
+            u_nodesPositionTexture,
+            regionNodeIndex,
+            NODES_TEXTURE_SIZE
+          );
+          vec4 regionNodeDimensions = getValueInTexture(
+            u_nodesDimensionsTexture,
+            regionNodeIndex,
+            NODES_TEXTURE_SIZE
+          );
+          float regionNodeMass = regionNodeDimensions.r;
+          vec2 diff = vec2(x, y) - regionNodePosition.xy;
+          float d = sqrt(dot(diff, diff));
+
+          if (d > 0.0) {
+            float factor = repulsionCoefficient * nodeMass * regionNodeMass / d;
+            dx += diff.x * factor;
+            dy += diff.y * factor;
+          }
+        }
+        
+        // When this is done, we iterate. We have to look at the next sibling.
+        regionIndex = regionNextSibling;
+        if (regionIndex <= 0.0) break; // No next sibling: we have finished the tree
+      }
     }
-  }
+
+  #else
+    for (float j = 0.0; j < NODES_COUNT; j++) {
+      if (j != nodeIndex) {
+        vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
+        vec3 otherNodeDimensions = getValueInTexture(u_nodesDimensionsTexture, j, NODES_TEXTURE_SIZE).rgb;
+        float otherNodeMass = otherNodeDimensions.r;
+        float otherNodeSize = otherNodeDimensions.g;
+  
+        vec2 diff = nodePosition.xy - otherNodePosition.xy;
+        float factor = 0.0;
+  
+        #ifdef ADJUST_SIZES
+          // Anticollision Linear Repulsion
+          float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
+          if (d > 0.0) {
+            factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
+          } else if (d < 0.0) {
+            factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
+          }
+  
+        #else
+          // Linear Repulsion
+          float dSquare = dot(diff, diff);
+          if (dSquare > 0.0) {
+            factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
+          }
+        #endif
+  
+        dx += diff.x * factor;
+        dy += diff.y * factor;
+      }
+    }
+  #endif
 
   // GRAVITY:
   float distanceToCenter = sqrt(x * x + y * y);

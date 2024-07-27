@@ -1,6 +1,7 @@
 import Graph from "graphology";
 import { Attributes } from "graphology-types";
 
+import { getBarnesHutQuadTree } from "./barnes-hut";
 import {
   DATA_TEXTURES,
   DATA_TEXTURES_FORMATS,
@@ -25,6 +26,7 @@ export class ForceAtlas2GPU<
   EdgeAttributes extends Attributes = Attributes,
 > {
   private isRunning = false;
+  private animationFrameID: null | number;
   private graph: Graph<NodeAttributes, EdgeAttributes>;
   private params: ForceAtlas2Settings;
   private nodeDataCache: Record<
@@ -139,9 +141,11 @@ export class ForceAtlas2GPU<
     const fragmentShaderSource = getFragmentShader({
       graph: this.graph,
       maxNeighborsCount: this.maxNeighborsCount,
-      strongGravityMode: this.params.strongGravityMode,
+
       linLogMode: this.params.linLogMode,
       adjustSizes: this.params.adjustSizes,
+      strongGravityMode: this.params.strongGravityMode,
+      barnesHutOptimize: this.params.barnesHutOptimize,
       outboundAttractionDistribution: this.params.outboundAttractionDistribution,
     });
     const vertexShaderSource = getVertexShader();
@@ -163,6 +167,7 @@ export class ForceAtlas2GPU<
 
     // Bind all required uniforms (example, adapt based on actual shader code):
     this.uniformLocations = {};
+    this.uniformLocations.regionsTextureSize = gl.getUniformLocation(this.program, `u_regionsTextureSize`);
     this.uniformLocations.outboundAttCompensation = gl.getUniformLocation(this.program, `u_outboundAttCompensation`);
     UNIFORM_SETTINGS.forEach((setting) => {
       this.uniformLocations[setting] = gl.getUniformLocation(this.program, `u_${setting}`);
@@ -442,17 +447,50 @@ export class ForceAtlas2GPU<
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
+  private refreshBarnesHutQuadTree() {
+    const { gl } = this;
+    if (!this.params.barnesHutOptimize) return;
+
+    // Refresh data:
+    this.dataArrays.regions = getBarnesHutQuadTree(this.graph, this.nodeDataCache);
+
+    // Reset texture:
+    // - 3 fragments (on RGB channels only) per region, since each region has 9 attributes:
+    const textureSize = getTextureSize(this.dataArrays.regions * 3);
+
+    const textureIndex = DATA_TEXTURES.indexOf("regions");
+    gl.activeTexture(gl.TEXTURE0 + textureIndex);
+    gl.bindTexture(gl.TEXTURE_2D, this.dataTextures.regions);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      DATA_TEXTURES_LEVELS[DATA_TEXTURES_SPECS.regions.attributesPerItem],
+      textureSize,
+      textureSize,
+      0,
+      DATA_TEXTURES_FORMATS[DATA_TEXTURES_SPECS.regions.attributesPerItem],
+      gl.FLOAT,
+      this.dataArrays.regions,
+    );
+
+    // Refresh `regionsTextureSize` uniform:
+    gl.uniform1f(this.uniformLocations.regionsTextureSize, textureSize);
+  }
+
   private step(iterations = 1) {
     let iterationsLeft = iterations;
     if (!this.isRunning) return;
 
-    while (iterationsLeft-- > 0) {
+    while (iterationsLeft > 0) {
+      if (iterationsLeft < iterations) this.readOutput(false);
+      if (this.params.barnesHutOptimize) this.refreshBarnesHutQuadTree();
+
       this.runProgram();
-      if (iterationsLeft > 0) this.readOutput(false);
+      iterationsLeft--;
     }
     this.readOutput(true);
 
-    requestAnimationFrame(() => this.step(iterations));
+    this.animationFrameID = setTimeout(() => this.step(iterations), 0);
   }
 
   /**
@@ -475,6 +513,15 @@ export class ForceAtlas2GPU<
   }
 
   public stop() {
+    if (this.animationFrameID) {
+      clearTimeout(this.animationFrameID);
+      this.animationFrameID = null;
+    }
     this.isRunning = false;
+  }
+
+  public run(opts: Partial<ForceAtlas2RunOptions> = {}) {
+    this.start(opts);
+    this.stop();
   }
 }
