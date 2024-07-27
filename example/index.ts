@@ -7,8 +7,8 @@ import { ForceAtlas2GPU } from "../src";
 
 async function init() {
   const PARAMS = {
-    order: 2000,
-    size: 10000,
+    order: 1000,
+    size: 5000,
     clusters: 3,
   };
 
@@ -31,19 +31,21 @@ async function init() {
 
   const container = document.getElementById("stage") as HTMLDivElement;
   const fa2 = new ForceAtlas2GPU(graph, {
-    // gravity: 0.05,
-    // scalingRatio: 10,
-    // slowDown: 1 + Math.log(graph.order),
-    // strongGravityMode: true,
+    gravity: 0.05,
+    scalingRatio: 10,
+    slowDown: 1 + Math.log(graph.order),
+    strongGravityMode: true,
+    iterationsPerStep: 10,
     // adjustSizes: true,
-    // outboundAttractionDistribution: false,
+    // linLogMode: true,
+    // outboundAttractionDistribution: true,
   });
   const _renderer = new Sigma(graph, container, {
     itemSizesReference: "positions",
     zoomToSizeRatioFunction: (x) => x,
   });
 
-  fa2.start({ iterationsPerStep: 1 });
+  fa2.start(1000);
 
   return "FA2 was initialized properly";
 }

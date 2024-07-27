@@ -1,30 +1,22 @@
 import Graph from "graphology";
 
-import { getTextureSize, numberToGLSLFloat } from "./utils";
+import { ForceAtlas2Flags } from "../consts";
+import { getTextureSize, numberToGLSLFloat } from "../utils";
 
-export function getFragmentShader({
+export function getForceAtlas2FragmentShader({
   graph,
-  maxNeighborsCount,
-  strongGravityMode,
   linLogMode,
   adjustSizes,
+  strongGravityMode,
   outboundAttractionDistribution,
 }: {
   graph: Graph;
-  maxNeighborsCount: number;
-  strongGravityMode?: boolean;
-  linLogMode?: boolean;
-  adjustSizes?: boolean;
-  outboundAttractionDistribution?: boolean;
-}) {
+} & ForceAtlas2Flags) {
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
 precision highp float;
 
-#define EPSILON 0.01
 #define NODES_COUNT ${numberToGLSLFloat(graph.order)}
-#define EDGES_COUNT ${numberToGLSLFloat(graph.size)}
-#define MAX_NEIGHBORS_COUNT ${numberToGLSLFloat(maxNeighborsCount)}
 #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.order))}
 #define EDGES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.size * 2))}
 ${linLogMode ? "#define LINLOG_MODE" : ""}
@@ -32,10 +24,10 @@ ${adjustSizes ? "#define ADJUST_SIZES" : ""}
 ${strongGravityMode ? "#define STRONG_GRAVITY_MODE" : ""}
 ${outboundAttractionDistribution ? "#define OUTBOUND_ATTRACTION_DISTRIBUTION" : ""}
 
-// Textures management:
+// Graph data:
 uniform sampler2D u_nodesPositionTexture;
-uniform sampler2D u_nodesDimensionsTexture;
-uniform sampler2D u_nodesEdgesPointersTexture;
+uniform sampler2D u_nodesMovementTexture;
+uniform sampler2D u_nodesMetadataTexture;
 uniform sampler2D u_edgesTexture;
 in vec2 v_textureCoord;
 
@@ -51,13 +43,14 @@ uniform float u_slowDown;
 #endif
 
 // Output
-out vec4 fragColor;
+layout(location = 0) out vec4 positionOutput;
+layout(location = 1) out vec4 movementOutput;
 
 vec4 getValueInTexture(sampler2D inputTexture, float index, float textureSize) {
   float row = floor(index / textureSize);
   float col = index - row * textureSize;
   return texture(
-  inputTexture,
+    inputTexture,
     vec2(
       (col + 0.5) / textureSize,
       (row + 0.5) / textureSize
@@ -73,34 +66,33 @@ float getIndex(vec2 positionInTexture, float textureSize) {
 
 void main() {
   float nodeIndex = getIndex(v_textureCoord, NODES_TEXTURE_SIZE);
-  if (nodeIndex > NODES_COUNT) return;
+  if (nodeIndex >= NODES_COUNT) return;
 
   vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, nodeIndex, NODES_TEXTURE_SIZE);
   float x = nodePosition.x;
   float y = nodePosition.y;
-  float oldDx = nodePosition.b;
-  float oldDy = nodePosition.a;
+
+  vec4 nodeMovement = getValueInTexture(u_nodesMovementTexture, nodeIndex, NODES_TEXTURE_SIZE);
+  float oldDx = nodeMovement.x;
+  float oldDy = nodeMovement.y;
+  float nodeConvergence = nodeMovement.z;
   float dx = 0.0;
   float dy = 0.0;
-
-
-  vec3 nodeDimensions = getValueInTexture(u_nodesDimensionsTexture, nodeIndex, NODES_TEXTURE_SIZE).rgb;
-  float nodeMass = nodeDimensions.r;
-  float nodeSize = nodeDimensions.g;
-  float nodeConvergence = nodeDimensions.b;
-
-  vec2 nodeEdgesPointers = getValueInTexture(u_nodesEdgesPointersTexture, nodeIndex, NODES_TEXTURE_SIZE).xy;
-  float edgesOffset = nodeEdgesPointers.r;
-  float neighborsCount = nodeEdgesPointers.g;
+  
+  vec4 nodeMetadata = getValueInTexture(u_nodesMetadataTexture, nodeIndex, NODES_TEXTURE_SIZE);
+  float nodeMass = nodeMetadata.r;
+  float nodeSize = nodeMetadata.g;
+  float edgesOffset = nodeMetadata.b;
+  float neighborsCount = nodeMetadata.a;
 
   // REPULSION:
   float repulsionCoefficient = u_scalingRatio;
   for (float j = 0.0; j < NODES_COUNT; j++) {
     if (j != nodeIndex) {
       vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
-      vec3 otherNodeDimensions = getValueInTexture(u_nodesDimensionsTexture, j, NODES_TEXTURE_SIZE).rgb;
-      float otherNodeMass = otherNodeDimensions.r;
-      float otherNodeSize = otherNodeDimensions.g;
+      vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, j, NODES_TEXTURE_SIZE);
+      float otherNodeMass = otherNodeMetadata.r;
+      float otherNodeSize = otherNodeMetadata.g;
 
       vec2 diff = nodePosition.xy - otherNodePosition.xy;
       float factor = 0.0;
@@ -130,12 +122,10 @@ void main() {
   // GRAVITY:
   float distanceToCenter = sqrt(x * x + y * y);
   float gravityFactor = 0.0;
-  float gravityCoefficient = u_scalingRatio;
-  float g = u_gravity / u_scalingRatio;
   #ifdef STRONG_GRAVITY_MODE
-    if (distanceToCenter > 0.0) gravityFactor = gravityCoefficient * nodeMass * g;
+    if (distanceToCenter > 0.0) gravityFactor = nodeMass * u_gravity;
   #else
-    if (distanceToCenter > 0.0) gravityFactor = gravityCoefficient * nodeMass * g / distanceToCenter;
+    if (distanceToCenter > 0.0) gravityFactor = nodeMass * u_gravity / distanceToCenter;
   #endif
 
   dx -= x * gravityFactor;
@@ -148,21 +138,21 @@ void main() {
     float attractionCoefficient = 1.0;
   #endif
 
-  for (float j = 0.0; j < MAX_NEIGHBORS_COUNT; j++) {
-    if (j >= neighborsCount) break;
-
-    vec2 edgeData = getValueInTexture(u_edgesTexture, j + edgesOffset, EDGES_TEXTURE_SIZE).xy;
+  for (float j = 0.0; j < neighborsCount; j++) {
+    vec2 edgeData = getValueInTexture(u_edgesTexture, edgesOffset + j, EDGES_TEXTURE_SIZE).xy;
     float otherNodeIndex = edgeData.x;
     float weight = edgeData.y;
     float edgeWeightInfluence = pow(weight, u_edgeWeightInfluence);
 
     vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
-
     vec2 diff = nodePosition.xy - otherNodePosition.xy;
 
+    positionOutput.z = edgeData.x;
+    positionOutput.w = edgeData.y;
+
     #ifdef ADJUST_SIZES
-      vec4 otherNodeDimensions = getValueInTexture(u_nodesDimensionsTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
-      float otherNodeSize = otherNodeDimensions.g;
+      vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
+      float otherNodeSize = otherNodeMetadata.g;
       float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
     #else
       float d = sqrt(dot(diff, diff));
@@ -173,13 +163,13 @@ void main() {
       #ifdef OUTBOUND_ATTRACTION_DISTRIBUTION
         // LinLog Degree Distributed Anti-collision Attraction
         if (d > 0.0) {
-          attractionFactor = (-attractionCoefficient * edgeWeightInfluence * log(1 + d)) / d / nodeMass;
+          attractionFactor = (-attractionCoefficient * edgeWeightInfluence * log(1.0 + d)) / d / nodeMass;
         }
 
       #else
         // LinLog Anti-collision Attraction
         if (d > 0.0) {
-          attractionFactor = (-attractionCoefficient * edgeWeightInfluence * log(1 + d)) / d;
+          attractionFactor = (-attractionCoefficient * edgeWeightInfluence * log(1.0 + d)) / d;
         }
       #endif
 
@@ -231,14 +221,20 @@ void main() {
   #else
     float nodeSpeed = (nodeConvergence * log(1.0 + traction)) * swingingFactor;
     // Store new node convergence:
-    fragColor.z = min(
+    movementOutput.z = min(
       1.0,
       sqrt(nodeSpeed * forceSquared * swingingFactor)
     );
   #endif
-
-  fragColor.x = x + dx * nodeSpeed / u_slowDown;
-  fragColor.y = y + dy * nodeSpeed / u_slowDown;
+  
+  dx = dx * nodeSpeed / u_slowDown;
+  dy = dy * nodeSpeed / u_slowDown;
+  
+  positionOutput.x = x + dx;
+  positionOutput.y = y + dy;
+  
+  movementOutput.x = dx;
+  movementOutput.y = dy;
 }`;
 
   return SHADER;

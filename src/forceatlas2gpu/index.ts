@@ -1,62 +1,57 @@
 import Graph from "graphology";
 import { Attributes } from "graphology-types";
 
-import {
-  DATA_TEXTURES,
-  DATA_TEXTURES_FORMATS,
-  DATA_TEXTURES_LEVELS,
-  DATA_TEXTURES_SPECS,
-  DEFAULT_FORCE_ATLAS_2_RUN_OPTIONS,
-  DEFAULT_FORCE_ATLAS_2_SETTINGS,
-  ForceAtlas2RunOptions,
-  ForceAtlas2Settings,
-  TextureName,
-  UNIFORM_SETTINGS,
-} from "./consts";
-import { getFragmentShader } from "./shader-fragment";
-import { getVertexShader } from "./shader-vertex";
-import { getTextureSize } from "./utils";
+import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
+import { getForceAtlas2FragmentShader } from "./shaders/fragment.force-atlas-2";
+import { getVertexShader } from "./shaders/vertex.basic";
+import { getTextureSize, waitForGPUCompletion } from "./utils";
+import { WebCLProgram } from "./webcl-program";
 
 export * from "./consts";
 export * from "./utils";
+
+const ATTRIBUTES_PER_ITEM = {
+  nodesPosition: 4,
+  nodesMovement: 4,
+  nodesMetadata: 4,
+  edges: 2,
+} as const;
 
 export class ForceAtlas2GPU<
   NodeAttributes extends Attributes = Attributes,
   EdgeAttributes extends Attributes = Attributes,
 > {
+  private canvas: HTMLCanvasElement;
+  private gl: WebGL2RenderingContext;
+
+  // Internal state:
+  private remainingSteps = 0;
   private isRunning = false;
-  private graph: Graph<NodeAttributes, EdgeAttributes>;
+  private animationFrameID: null | number;
   private params: ForceAtlas2Settings;
+
+  // Graph data and various caches:
+  private graph: Graph<NodeAttributes, EdgeAttributes>;
+  private maxNeighborsCount: number;
+  private outboundAttCompensation: number;
   private nodeDataCache: Record<
     string,
     {
       index: number;
-      convergence: number;
       mass: number;
+      convergence: number;
     }
   >;
+  private nodesPositionArray: Float32Array;
+  private nodesMovementArray: Float32Array;
+  private nodesMetadataArray: Float32Array;
+  private edgesArray: Float32Array;
 
-  // WebGL:
-  private canvas: HTMLCanvasElement;
-  private gl: WebGL2RenderingContext;
-  private program: WebGLProgram;
-
-  // Program input data
-  private dataTextures: Record<TextureName, WebGLTexture>;
-  private dataArrays: Record<TextureName, Float32Array>;
-  private maxNeighborsCount: number;
-  private outboundAttCompensation: number;
-
-  // Program input attributes and uniforms
-  private positionLocation: number;
-  private positionBuffer: WebGLBuffer;
-  private textureCoordLocation: number;
-  private textureCoordBuffer: WebGLBuffer;
-  private uniformLocations: Record<string, WebGLUniformLocation>;
-
-  // Program output
-  private outputTexture: WebGLTexture;
-  private framebuffer: WebGLFramebuffer;
+  // Programs:
+  private fa2Program: WebCLProgram<
+    "nodesPosition" | "nodesMovement" | "nodesMetadata" | "edges",
+    "nodesPosition" | "nodesMovement"
+  >;
 
   constructor(graph: Graph<NodeAttributes, EdgeAttributes>, params: Partial<ForceAtlas2Settings> = {}) {
     // Initialize data:
@@ -65,14 +60,14 @@ export class ForceAtlas2GPU<
       ...DEFAULT_FORCE_ATLAS_2_SETTINGS,
       ...params,
     };
-
     this.nodeDataCache = {};
 
-    // Initialize WebGL2 context and textures:
-    const canvasSize = getTextureSize(graph.order);
+    this.readGraph();
+
+    // Initialize WebGL2 context:
     this.canvas = document.createElement("canvas");
-    this.canvas.width = canvasSize;
-    this.canvas.height = canvasSize;
+    this.canvas.width = 1;
+    this.canvas.height = 1;
     const gl = this.canvas.getContext("webgl2");
     if (!gl) throw new Error("WebGL2 is not supported in this browser.");
     this.gl = gl;
@@ -83,184 +78,33 @@ export class ForceAtlas2GPU<
       throw new Error("EXT_color_buffer_float extension not supported");
     }
 
-    // Create framebuffer:
-    this.framebuffer = gl.createFramebuffer();
-
-    // Create renderable texture
-    this.outputTexture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.outputTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, canvasSize, canvasSize, 0, gl.RGBA, gl.FLOAT, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-    // Attach the renderable texture to the framebuffer's color attachment
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outputTexture, 0);
-
-    // Check the framebuffer status
-    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error(`Framebuffer not complete: ${status.toString(16)}`);
-    }
-
-    // Unbind framebuffer
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-    // Read graph:
-    this.refreshTexturesData();
-
-    // Initialize WebGL program:
-    this.setProgram();
-  }
-
-  /**
-   * Private lifecycle functions:
-   * ****************************
-   */
-  private compileShader(type: number, source: string): WebGLShader {
-    const gl = this.gl;
-    const shader = gl.createShader(type) as WebGLShader;
-
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      throw new Error("Failed to compile shader: " + gl.getShaderInfoLog(shader));
-    }
-
-    return shader;
-  }
-
-  private setProgram() {
-    const gl = this.gl;
-
-    const fragmentShaderSource = getFragmentShader({
-      graph: this.graph,
-      maxNeighborsCount: this.maxNeighborsCount,
-      strongGravityMode: this.params.strongGravityMode,
-      linLogMode: this.params.linLogMode,
-      adjustSizes: this.params.adjustSizes,
-      outboundAttractionDistribution: this.params.outboundAttractionDistribution,
-    });
-    const vertexShaderSource = getVertexShader();
-
-    const fragmentShader = this.compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
-    const vertexShader = this.compileShader(gl.VERTEX_SHADER, vertexShaderSource);
-
-    this.program = gl.createProgram() as WebGLProgram;
-
-    gl.attachShader(this.program, vertexShader);
-    gl.attachShader(this.program, fragmentShader);
-    gl.linkProgram(this.program);
-
-    if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) {
-      throw new Error("Failed to link program: " + gl.getProgramInfoLog(this.program));
-    }
-
-    gl.useProgram(this.program);
-
-    // Bind all required uniforms (example, adapt based on actual shader code):
-    this.uniformLocations = {};
-    this.uniformLocations.outboundAttCompensation = gl.getUniformLocation(this.program, `u_outboundAttCompensation`);
-    UNIFORM_SETTINGS.forEach((setting) => {
-      this.uniformLocations[setting] = gl.getUniformLocation(this.program, `u_${setting}`);
-    });
-
-    this.dataTextures = {} as typeof this.dataTextures;
-    DATA_TEXTURES.forEach((textureName, index) => {
-      this.uniformLocations[textureName] = gl.getUniformLocation(this.program, `u_${textureName}Texture`);
-      const texture = gl.createTexture();
-      gl.activeTexture(gl.TEXTURE0 + index);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.uniform1i(this.uniformLocations[textureName], index);
-
-      this.dataTextures[textureName] = texture;
-    });
-
-    // Activate the output texture
-    gl.activeTexture(gl.TEXTURE0 + DATA_TEXTURES.length);
-    gl.bindTexture(gl.TEXTURE_2D, this.outputTexture);
-    gl.uniform1i(gl.getUniformLocation(this.program, "u_outputTexture"), DATA_TEXTURES.length);
-
-    this.positionLocation = gl.getAttribLocation(this.program, "a_position");
-    this.textureCoordLocation = gl.getAttribLocation(this.program, "a_textureCoord");
-
-    // Initialize buffers for attributes
-    this.initBuffers();
-  }
-
-  private initBuffers() {
-    const gl = this.gl;
-
-    // Create a buffer for the positions.
-    this.positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
-
-    const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
-    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-
-    // Create a buffer for the texture coordinates.
-    this.textureCoordBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.textureCoordBuffer);
-
-    const textureCoordinates = new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]);
-    gl.bufferData(gl.ARRAY_BUFFER, textureCoordinates, gl.STATIC_DRAW);
-  }
-
-  private enableVertexAttributes() {
-    const gl = this.gl;
-
-    // Bind the position buffer.
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
-    gl.vertexAttribPointer(this.positionLocation, 2, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(this.positionLocation);
-
-    // Bind the texture coordinate buffer.
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.textureCoordBuffer);
-    gl.vertexAttribPointer(this.textureCoordLocation, 2, gl.FLOAT, true, 0, 0);
-    gl.enableVertexAttribArray(this.textureCoordLocation);
-  }
-
-  private refreshTextures() {
-    const { gl, graph } = this;
-
-    DATA_TEXTURES.forEach((textureName, i) => {
-      const { attributesPerItem, getItemsCount } = DATA_TEXTURES_SPECS[textureName];
-      const itemsCount = getItemsCount(graph);
-      const textureSize = getTextureSize(itemsCount);
-
-      gl.activeTexture(gl.TEXTURE0 + i);
-      gl.bindTexture(gl.TEXTURE_2D, this.dataTextures[textureName]);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        DATA_TEXTURES_LEVELS[attributesPerItem],
-        textureSize,
-        textureSize,
-        0,
-        DATA_TEXTURES_FORMATS[attributesPerItem],
-        gl.FLOAT,
-        this.dataArrays[textureName],
-      );
+    // Initialize programs:
+    this.fa2Program = new WebCLProgram({
+      gl,
+      fragments: this.graph.order,
+      fragmentShaderSource: getForceAtlas2FragmentShader({
+        graph,
+        linLogMode: this.params.linLogMode,
+        adjustSizes: this.params.adjustSizes,
+        strongGravityMode: this.params.strongGravityMode,
+        outboundAttractionDistribution: this.params.outboundAttractionDistribution,
+      }),
+      vertexShaderSource: getVertexShader(),
+      dataTextures: [
+        { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition },
+        { name: "nodesMovement", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMovement },
+        { name: "nodesMetadata", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMetadata },
+        { name: "edges", attributesPerItem: ATTRIBUTES_PER_ITEM.edges },
+      ],
+      outputTextures: [
+        { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition },
+        { name: "nodesMovement", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMovement },
+      ],
     });
   }
 
-  private refreshTexturesData() {
+  private readGraph() {
     const { graph } = this;
-
-    this.dataArrays = {} as typeof this.dataArrays;
-    DATA_TEXTURES.forEach((textureName) => {
-      const { attributesPerItem, getItemsCount } = DATA_TEXTURES_SPECS[textureName];
-
-      const textureSize = getTextureSize(getItemsCount(graph));
-      this.dataArrays[textureName] = new Float32Array(textureSize ** 2 * attributesPerItem);
-    });
     const neighborsPerSource: { weight: number; index: number }[][] = [];
 
     // Index nodes per order:
@@ -273,11 +117,11 @@ export class ForceAtlas2GPU<
       };
 
       neighborsPerSource[i] = [];
-      i++;
     });
 
     // Index edges per sources and targets:
-    graph.forEachEdge((_edge, { weight }: { weight: number }, source, target) => {
+    graph.forEachEdge((_edge, attr: { weight: number; size: number }, source, target) => {
+      const weight = attr.weight || 1;
       const sourceIndex = this.nodeDataCache[source].index;
       const targetIndex = this.nodeDataCache[target].index;
 
@@ -287,7 +131,13 @@ export class ForceAtlas2GPU<
       this.nodeDataCache[target].mass += weight;
     });
 
-    // Feed the textures:
+    const nodesTextureSize = getTextureSize(graph.order);
+    const edgesTextureSize = getTextureSize(graph.size * 2);
+    this.nodesPositionArray = new Float32Array(ATTRIBUTES_PER_ITEM.nodesPosition * nodesTextureSize ** 2);
+    this.nodesMovementArray = new Float32Array(ATTRIBUTES_PER_ITEM.nodesMovement * nodesTextureSize ** 2);
+    this.nodesMetadataArray = new Float32Array(ATTRIBUTES_PER_ITEM.nodesMetadata * nodesTextureSize ** 2);
+    this.edgesArray = new Float32Array(ATTRIBUTES_PER_ITEM.edges * edgesTextureSize ** 2);
+
     let k = 0;
     let edgeIndex = 0;
     this.maxNeighborsCount = 0;
@@ -298,27 +148,27 @@ export class ForceAtlas2GPU<
       const neighborsCount = neighbors.length;
       this.maxNeighborsCount = Math.max(this.maxNeighborsCount, neighborsCount);
 
-      k = index * DATA_TEXTURES_SPECS.nodesPosition.attributesPerItem;
-      this.dataArrays.nodesPosition[k++] = x;
-      this.dataArrays.nodesPosition[k++] = y;
-      this.dataArrays.nodesPosition[k++] = 0;
-      this.dataArrays.nodesPosition[k++] = 0;
+      k = index * ATTRIBUTES_PER_ITEM.nodesPosition;
+      this.nodesPositionArray[k++] = x;
+      this.nodesPositionArray[k++] = y;
 
-      k = index * DATA_TEXTURES_SPECS.nodesDimensions.attributesPerItem;
-      this.dataArrays.nodesDimensions[k++] = mass;
-      this.dataArrays.nodesDimensions[k++] = size;
-      this.dataArrays.nodesDimensions[k++] = convergence;
+      k = index * ATTRIBUTES_PER_ITEM.nodesMovement;
+      this.nodesMovementArray[k++] = 0;
+      this.nodesMovementArray[k++] = 0;
+      this.nodesMovementArray[k++] = convergence;
+
+      k = index * ATTRIBUTES_PER_ITEM.nodesMetadata;
+      this.nodesMetadataArray[k++] = mass;
+      this.nodesMetadataArray[k++] = size;
+      this.nodesMetadataArray[k++] = edgeIndex;
+      this.nodesMetadataArray[k++] = neighborsCount;
       this.outboundAttCompensation += mass;
 
-      k = index * DATA_TEXTURES_SPECS.nodesEdgesPointers.attributesPerItem;
-      this.dataArrays.nodesEdgesPointers[k++] = edgeIndex;
-      this.dataArrays.nodesEdgesPointers[k++] = neighborsCount;
-
       for (let j = 0; j < neighborsCount; j++) {
-        const { weight, index } = neighbors[j];
-        k = edgeIndex * DATA_TEXTURES_SPECS.edges.attributesPerItem;
-        this.dataArrays.edges[k++] = index;
-        this.dataArrays.edges[k++] = weight;
+        const { weight = 1, index } = neighbors[j];
+        k = edgeIndex * ATTRIBUTES_PER_ITEM.edges;
+        this.edgesArray[k++] = index;
+        this.edgesArray[k++] = weight;
         edgeIndex++;
       }
     });
@@ -326,155 +176,92 @@ export class ForceAtlas2GPU<
     this.outboundAttCompensation /= graph.order;
   }
 
-  private readOutput(updateGraph?: boolean) {
-    const { gl, graph } = this;
-    const nodesCount = graph.order;
-    const textureSize = getTextureSize(nodesCount);
-    const outputArr = new Float32Array(textureSize * textureSize * 4);
-
-    // Bind the framebuffer before reading pixels
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
-
-    // Read from the renderable texture attached to the framebuffer
-    gl.readPixels(0, 0, textureSize, textureSize, gl.RGBA, gl.FLOAT, outputArr);
-
-    // Unbind the framebuffer
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-    graph.forEachNode((n, { x: oldX, y: oldY }) => {
-      const { index } = this.nodeDataCache[n];
-      const x = outputArr[4 * index];
-      const y = outputArr[4 * index + 1];
-      const convergence = outputArr[4 * index + 2];
-
-      const dx = x - oldX;
-      const dy = y - oldY;
-
-      this.nodeDataCache[n].convergence = convergence;
-
-      // Update graph:
-      if (updateGraph)
-        graph.mergeNodeAttributes(n, {
-          x,
-          y,
-        });
-
-      // Update textures data:
-      let k = index * DATA_TEXTURES_SPECS.nodesPosition.attributesPerItem;
-      this.dataArrays.nodesPosition[k++] = x;
-      this.dataArrays.nodesPosition[k++] = y;
-      this.dataArrays.nodesPosition[k++] = dx;
-      this.dataArrays.nodesPosition[k++] = dy;
-
-      k = index * DATA_TEXTURES_SPECS.nodesDimensions.attributesPerItem;
-      this.dataArrays.nodesDimensions[k + 2] = convergence;
-    });
-
-    this.refreshTextures();
-  }
-
-  private checkGraph() {
+  private updateGraph() {
     const { graph } = this;
-    graph.forEachNode((n, { x, y }: { x?: number; y?: number }) => {
+
+    const nodesPosition = this.fa2Program.getOutput("nodesPosition");
+
+    graph.forEachNode((n) => {
+      const { index } = this.nodeDataCache[n];
+      const x = nodesPosition[ATTRIBUTES_PER_ITEM.nodesPosition * index];
+      const y = nodesPosition[ATTRIBUTES_PER_ITEM.nodesPosition * index + 1];
+
       graph.mergeNodeAttributes(n, {
-        x: typeof x === "number" ? x : 0,
-        y: typeof y === "number" ? y : 0,
-      });
-    });
-    graph.forEachEdge((e, { weight }: { weight?: number }) => {
-      graph.mergeEdgeAttributes(e, {
-        weight: typeof weight === "number" ? weight : 1,
+        x,
+        y,
       });
     });
   }
 
-  private kill() {
-    const { gl } = this;
+  private swapFA2Textures() {
+    const { fa2Program } = this;
 
-    if (this.program) gl.deleteProgram(this.program);
-    DATA_TEXTURES.forEach((textureName) => {
-      if (this.dataTextures[textureName]) gl.deleteTexture(this.dataTextures[textureName]);
-    });
-
-    if (this.outputTexture) gl.deleteTexture(this.outputTexture);
-
-    const extension = gl.getExtension("WEBGL_lose_context");
-    if (extension) {
-      extension.loseContext();
-    }
-
-    (this as { gl?: unknown }).gl = null;
+    [fa2Program.dataTexturesIndex.nodesPosition.texture, fa2Program.outputTexturesIndex.nodesPosition.texture] = [
+      fa2Program.outputTexturesIndex.nodesPosition.texture,
+      fa2Program.dataTexturesIndex.nodesPosition.texture,
+    ];
+    [fa2Program.dataTexturesIndex.nodesMovement.texture, fa2Program.outputTexturesIndex.nodesMovement.texture] = [
+      fa2Program.outputTexturesIndex.nodesMovement.texture,
+      fa2Program.dataTexturesIndex.nodesMovement.texture,
+    ];
   }
 
-  private setUniforms() {
-    const { gl } = this;
-    gl.uniform1f(this.uniformLocations.outboundAttCompensation, this.outboundAttCompensation);
-    UNIFORM_SETTINGS.forEach((setting: keyof ForceAtlas2Settings) => {
-      gl.uniform1f(this.uniformLocations[setting], this.params[setting] as number);
-    });
-  }
+  private async step() {
+    const { fa2Program, params } = this;
+    const { iterationsPerStep } = params;
 
-  private runProgram() {
-    const gl = this.gl;
+    let remainingIterations = iterationsPerStep;
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
+    while (remainingIterations-- > 0) {
+      if (!this.isRunning) {
+        this.stop();
+        return;
+      }
 
-    // Attach the texture to the framebuffer's color attachment
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outputTexture, 0);
+      const fa2Uniforms = {
+        outboundAttCompensation: this.outboundAttCompensation,
+      };
+      UNIFORM_SETTINGS.forEach((setting) => (fa2Uniforms[setting] = params[setting]));
 
-    // Check the framebuffer status
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error("Framebuffer is not complete");
+      fa2Program.setUniforms(fa2Uniforms);
+      fa2Program.prepare();
+      fa2Program.compute();
+
+      if (remainingIterations > 0) this.swapFA2Textures();
     }
+    await waitForGPUCompletion(this.gl);
+    this.updateGraph();
+    this.swapFA2Textures();
 
-    // Set active texture for the output texture
-    gl.activeTexture(gl.TEXTURE0 + DATA_TEXTURES.length);
-    gl.bindTexture(gl.TEXTURE_2D, this.outputTexture);
-    gl.uniform1i(gl.getUniformLocation(this.program, "u_outputTexture"), DATA_TEXTURES.length);
-
-    // Enable vertex attributes
-    this.enableVertexAttributes();
-
-    // Run the WebGL program
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-    // Unbind the framebuffer
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  }
-
-  private step(iterations = 1) {
-    let iterationsLeft = iterations;
-    if (!this.isRunning) return;
-
-    while (iterationsLeft-- > 0) {
-      this.runProgram();
-      if (iterationsLeft > 0) this.readOutput(false);
-    }
-    this.readOutput(true);
-
-    requestAnimationFrame(() => this.step(iterations));
+    if (this.remainingSteps--) this.animationFrameID = setTimeout(() => this.step(), 0);
   }
 
   /**
    * Public API:
    * ***********
    */
-  public start(opts: Partial<ForceAtlas2RunOptions> = {}) {
-    const { iterationsPerStep }: ForceAtlas2RunOptions = {
-      ...DEFAULT_FORCE_ATLAS_2_RUN_OPTIONS,
-      ...opts,
-    };
-
-    this.checkGraph();
-    this.setUniforms();
-    this.refreshTexturesData();
-    this.refreshTextures();
-
+  public start(steps = 1) {
+    this.remainingSteps = steps;
     this.isRunning = true;
-    this.step(iterationsPerStep);
+    this.fa2Program.setTextureData("nodesPosition", this.nodesPositionArray, this.graph.order);
+    this.fa2Program.setTextureData("nodesMovement", this.nodesMovementArray, this.graph.order);
+    this.fa2Program.setTextureData("nodesMetadata", this.nodesMetadataArray, this.graph.order);
+    this.fa2Program.setTextureData("edges", this.edgesArray, this.graph.size * 2);
+
+    this.fa2Program.activate();
+    this.step();
   }
 
   public stop() {
+    if (this.animationFrameID) {
+      clearTimeout(this.animationFrameID);
+      this.animationFrameID = null;
+    }
     this.isRunning = false;
+  }
+
+  public run() {
+    this.start();
+    this.stop();
   }
 }
