@@ -1,16 +1,12 @@
 import Graph from "graphology";
 
 export const DATA_TEXTURES = [
-  // For each node: x, y, dx, dy
+  // For each node: x, y
   "nodesPosition",
-  // For each node: mass, size, convergenceScore
-  "nodesDimensions",
-  // For each node: firstEdgePosition, edgesCount
-  "nodesEdgesPointers",
+  // For each node: mass, size, firstEdgePosition, edgesCount
+  "nodesMetadata",
   // For each edge: target, weight
   "edges",
-  // Check the end of this file to see all data about each region
-  "regions",
 ] as const;
 
 export type TextureName = (typeof DATA_TEXTURES)[number];
@@ -19,11 +15,9 @@ export const DATA_TEXTURES_SPECS: Record<
   TextureName,
   { attributesPerItem: number; getItemsCount: (graph: Graph) => number }
 > = {
-  nodesPosition: { attributesPerItem: 4, getItemsCount: (graph: Graph) => graph.order },
-  nodesDimensions: { attributesPerItem: 3, getItemsCount: (graph: Graph) => graph.order },
-  nodesEdgesPointers: { attributesPerItem: 2, getItemsCount: (graph: Graph) => graph.order },
+  nodesPosition: { attributesPerItem: 2, getItemsCount: (graph: Graph) => graph.order },
+  nodesMetadata: { attributesPerItem: 4, getItemsCount: (graph: Graph) => graph.order },
   edges: { attributesPerItem: 2, getItemsCount: (graph: Graph) => graph.size * 2 },
-  regions: { attributesPerItem: 3, getItemsCount: () => 2 },
 };
 
 export const DATA_TEXTURES_LEVELS = {
@@ -45,7 +39,6 @@ export type ForceAtlas2Flags = {
   adjustSizes: boolean;
   strongGravityMode: boolean;
   outboundAttractionDistribution: boolean;
-  barnesHutOptimize: boolean;
 };
 export type ForceAtlas2Cursors = {
   edgeWeightInfluence: number;
@@ -53,7 +46,10 @@ export type ForceAtlas2Cursors = {
   gravity: number;
   slowDown: number;
   maxForce: number;
-  barnesHutTheta: number;
+  repulsionGridSize: number;
+  gridMargin: number; // Relatively to the dimension, ie 0.1 means 10% margin on each side.
+  stepsPerRepulsionStep: number;
+  iterationsPerStep: number;
 };
 export type ForceAtlas2Settings = ForceAtlas2Flags & ForceAtlas2Cursors;
 
@@ -62,7 +58,6 @@ export const DEFAULT_FORCE_ATLAS_2_FLAGS: ForceAtlas2Flags = {
   adjustSizes: false,
   strongGravityMode: false,
   outboundAttractionDistribution: false,
-  barnesHutOptimize: false,
 };
 export const DEFAULT_FORCE_ATLAS_2_CURSORS: ForceAtlas2Cursors = {
   edgeWeightInfluence: 1,
@@ -70,41 +65,14 @@ export const DEFAULT_FORCE_ATLAS_2_CURSORS: ForceAtlas2Cursors = {
   gravity: 1,
   slowDown: 1,
   maxForce: 10,
-  barnesHutTheta: 0.5,
+  repulsionGridSize: 64,
+  gridMargin: 0.1,
+  stepsPerRepulsionStep: 10,
+  iterationsPerStep: 2,
 };
 export const DEFAULT_FORCE_ATLAS_2_SETTINGS = {
   ...DEFAULT_FORCE_ATLAS_2_FLAGS,
   ...DEFAULT_FORCE_ATLAS_2_CURSORS,
 };
 
-export const UNIFORM_SETTINGS: (keyof ForceAtlas2Settings)[] = [
-  "edgeWeightInfluence",
-  "barnesHutTheta",
-  "scalingRatio",
-  "gravity",
-  "slowDown",
-  "maxForce",
-];
-
-export type ForceAtlas2RunOptions = {
-  iterationsPerStep: number;
-};
-
-export const DEFAULT_FORCE_ATLAS_2_RUN_OPTIONS: ForceAtlas2RunOptions = {
-  iterationsPerStep: 1,
-};
-
-// Barnes-Hut regions management:
-export const MAX_SUBDIVISION_ATTEMPTS = 3;
-export const ATTRIBUTES_PER_REGION = 9;
-
-// List of regions attributes:
-export const REGION_NODE = 0;
-export const REGION_CENTER_X = 1;
-export const REGION_CENTER_Y = 2;
-export const REGION_SIZE = 3;
-export const REGION_NEXT_SIBLING = 4;
-export const REGION_FIRST_CHILD = 5;
-export const REGION_MASS_CENTER_X = 6;
-export const REGION_MASS_CENTER_Y = 7;
-export const REGION_MASS = 8;
+export const UNIFORM_SETTINGS = Object.keys(DEFAULT_FORCE_ATLAS_2_CURSORS) as (keyof ForceAtlas2Settings)[];

@@ -44,7 +44,7 @@ async function init() {
     zoomToSizeRatioFunction: (x) => x,
   });
 
-  fa2.start({ iterationsPerStep: 5 });
+  fa2.start();
 
   return "FA2 was initialized properly";
 }
