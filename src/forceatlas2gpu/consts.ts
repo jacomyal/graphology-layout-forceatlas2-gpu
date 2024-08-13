@@ -46,9 +46,6 @@ export type ForceAtlas2Cursors = {
   gravity: number;
   slowDown: number;
   maxForce: number;
-  repulsionGridSize: number;
-  gridMargin: number; // Relatively to the dimension, ie 0.1 means 10% margin on each side.
-  stepsPerRepulsionStep: number;
   iterationsPerStep: number;
 };
 export type ForceAtlas2Settings = ForceAtlas2Flags & ForceAtlas2Cursors;
@@ -65,10 +62,7 @@ export const DEFAULT_FORCE_ATLAS_2_CURSORS: ForceAtlas2Cursors = {
   gravity: 1,
   slowDown: 1,
   maxForce: 10,
-  repulsionGridSize: 64,
-  gridMargin: 0.1,
-  stepsPerRepulsionStep: 10,
-  iterationsPerStep: 2,
+  iterationsPerStep: 50,
 };
 export const DEFAULT_FORCE_ATLAS_2_SETTINGS = {
   ...DEFAULT_FORCE_ATLAS_2_FLAGS,

@@ -1,34 +1,45 @@
 import { DATA_TEXTURES_FORMATS, DATA_TEXTURES_LEVELS } from "./consts";
 import { compileShader, getTextureSize } from "./utils";
 
-export class WebCLProgram<DATA_TEXTURE extends string = string, UNIFORM extends string = string> {
+export class WebCLProgram<
+  DATA_TEXTURE extends string = string,
+  OUTPUT_TEXTURE extends string = string,
+  UNIFORM extends string = string,
+> {
   public program: WebGLProgram;
   public gl: WebGL2RenderingContext;
   public size: number;
 
-  public dataTexturesNames: DATA_TEXTURE[];
   public uniformLocations: Record<UNIFORM, WebGLUniformLocation> = {};
+
+  public dataTexturesNames: DATA_TEXTURE[];
   public dataTextures: Record<DATA_TEXTURE, WebGLTexture> = {};
   public dataTextureIndexes: Record<DATA_TEXTURE, number> = {};
-  public outputTexture: WebGLTexture;
-  public outputFrameBuffer: WebGLFramebuffer;
+
+  public outputTexturesNames: OUTPUT_TEXTURE[];
+  public outputTextures: Record<OUTPUT_TEXTURE, WebGLTexture>;
+  public outputTextureIndexes: Record<OUTPUT_TEXTURE, number> = {};
+  public outputBuffer: WebGLFramebuffer;
 
   constructor({
     gl,
-    cells,
+    fragments,
     dataTextures,
+    outputTextures,
     fragmentShaderSource,
     vertexShaderSource,
   }: {
     gl: WebGL2RenderingContext;
-    cells: number;
+    fragments: number;
     dataTextures: DATA_TEXTURE[];
+    outputTextures: OUTPUT_TEXTURE[];
     fragmentShaderSource: string;
     vertexShaderSource: string;
   }) {
     this.gl = gl;
-    this.size = getTextureSize(cells);
+    this.size = getTextureSize(fragments);
     this.dataTexturesNames = dataTextures;
+    this.outputTexturesNames = outputTextures;
 
     // Instantiate program:
     this.program = gl.createProgram() as WebGLProgram;
@@ -46,8 +57,8 @@ export class WebCLProgram<DATA_TEXTURE extends string = string, UNIFORM extends 
     }
 
     // Handle output:
-    this.outputFrameBuffer = gl.createFramebuffer();
-    this.outputTexture = gl.createTexture();
+    this.outputTextures = [];
+    this.outputBuffer = gl.createFramebuffer();
 
     // Create a buffer for the positions.
     const positionLocation = gl.getAttribLocation(this.program, "a_position");
@@ -74,10 +85,19 @@ export class WebCLProgram<DATA_TEXTURE extends string = string, UNIFORM extends 
   }
 
   public prepare() {
-    const { gl, program, dataTexturesNames, dataTextureIndexes, dataTextures } = this;
+    const {
+      gl,
+      program,
+      size,
+      dataTexturesNames,
+      dataTextureIndexes,
+      dataTextures,
+      outputTexturesNames,
+      outputTextureIndexes,
+      outputTextures,
+    } = this;
 
-    this.activate();
-
+    // Handle data textures:
     dataTexturesNames.forEach((textureName, index) => {
       if (typeof dataTextureIndexes[textureName] !== "number") dataTextureIndexes[textureName] = index;
       if (!dataTextures[textureName]) dataTextures[textureName] = gl.createTexture();
@@ -93,19 +113,20 @@ export class WebCLProgram<DATA_TEXTURE extends string = string, UNIFORM extends 
     });
 
     // Handle output:
-    gl.bindTexture(gl.TEXTURE_2D, this.outputTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, this.size, this.size, 0, gl.RGBA, gl.FLOAT, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.outputBuffer);
+    outputTexturesNames.forEach((textureName, index) => {
+      if (typeof outputTextureIndexes[textureName] !== "number") outputTextureIndexes[textureName] = index;
+      if (!outputTextures[textureName]) outputTextures[textureName] = gl.createTexture();
+      const texture = outputTextures[textureName];
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.outputFrameBuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.outputTexture, 0);
-
-    // Clean:
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE0 + dataTexturesNames.length + index);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, size, size, 0, gl.RGBA, gl.FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl[`COLOR_ATTACHMENT${index}`], gl.TEXTURE_2D, texture, 0);
+    });
+    gl.drawBuffers(this.outputTexturesNames.map((_, i) => gl[`COLOR_ATTACHMENT${i}`]));
   }
 
   public setUniforms(uniforms: Record<UNIFORM, unknown>) {
@@ -147,23 +168,31 @@ export class WebCLProgram<DATA_TEXTURE extends string = string, UNIFORM extends 
   }
 
   public compute() {
-    const { gl } = this;
+    const { gl, outputTexturesNames, dataTexturesNames, outputTextures } = this;
 
-    gl.activeTexture(gl.TEXTURE0 + this.dataTexturesNames.length);
-    gl.bindTexture(gl.TEXTURE_2D, this.outputTexture);
+    outputTexturesNames.forEach((textureName, i) => {
+      gl.activeTexture(gl.TEXTURE0 + dataTexturesNames.length + i);
+      gl.bindTexture(gl.TEXTURE_2D, outputTextures[textureName]);
+    });
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.outputFrameBuffer);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  public getOutput() {
-    const { gl } = this;
-    const outputArr = new Float32Array(this.size * this.size * 4);
+  public getOutputs() {
+    const res: Record<OUTPUT_TEXTURE, Float32Array> = {};
+    this.outputTexturesNames.forEach((textureName) => {
+      res[textureName] = this.getOutput(textureName);
+    });
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.outputFrameBuffer);
-    gl.readPixels(0, 0, this.size, this.size, gl.RGBA, gl.FLOAT, outputArr);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return res;
+  }
+
+  public getOutput(textureName: OUTPUT_TEXTURE) {
+    const { gl, outputTextureIndexes, size } = this;
+
+    const outputArr = new Float32Array(size * size * 4);
+    gl.readBuffer(gl[`COLOR_ATTACHMENT${outputTextureIndexes[textureName]}`]);
+    gl.readPixels(0, 0, size, size, gl.RGBA, gl.FLOAT, outputArr);
 
     return outputArr;
   }
@@ -173,9 +202,15 @@ export class WebCLProgram<DATA_TEXTURE extends string = string, UNIFORM extends 
 
     if (this.program) gl.deleteProgram(this.program);
     for (const textureName in this.dataTextures) {
-      if (this.dataTextures[textureName]) gl.deleteTexture(this.dataTextures[textureName]);
+      gl.deleteTexture(this.dataTextures[textureName]);
     }
+    this.dataTextures = {};
 
-    if (this.outputTexture) gl.deleteTexture(this.outputTexture);
+    gl.deleteBuffer(this.outputBuffer);
+    this.outputTexturesNames.forEach((textureName) => {
+      gl.deleteTexture(this.outputTextures[textureName]);
+    });
+    this.outputTextures = {};
+    this.outputTexturesNames = [];
   }
 }

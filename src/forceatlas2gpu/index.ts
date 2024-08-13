@@ -3,7 +3,6 @@ import { Attributes } from "graphology-types";
 
 import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
 import { getForceAtlas3FragmentShader } from "./shaders/fragment.force-atlas-3";
-import { getRepulsionGradientFragmentShader } from "./shaders/fragment.repulsion-gradient";
 import { getVertexShader } from "./shaders/vertex.basic";
 import { getTextureSize } from "./utils";
 import { WebCLProgram } from "./webcl-program";
@@ -33,20 +32,18 @@ export class ForceAtlas2GPU<
     {
       index: number;
       mass: number;
+      convergence: number;
     }
   >;
-  private stageOffset: { x: number; y: number };
-  private stageDimensions: { width: number; height: number };
-  private barycenter: { x: number; y: number; mass: number };
   private nodesPositionArray: Float32Array;
   private nodesMetadataArray: Float32Array;
+  private nodesConvergenceArray: Float32Array;
   private edgesArray: Float32Array;
-  private relevantGridPointsArray: Float32Array;
 
   // Programs:
-  private repulsionGradientProgram: WebCLProgram<"nodesPosition" | "nodesMetadata" | "relevantGridPoints">;
   private fa3Program: WebCLProgram<
-    "nodesPosition" | "nodesMetadata" | "relevantGridPoints" | "repulsionGradient" | "edges"
+    "nodesPosition" | "nodesMetadata" | "nodesConvergence" | "edges",
+    "nodesPosition" | "nodesConvergence"
   >;
 
   constructor(graph: Graph<NodeAttributes, EdgeAttributes>, params: Partial<ForceAtlas2Settings> = {}) {
@@ -75,37 +72,21 @@ export class ForceAtlas2GPU<
     }
 
     // Initialize programs:
-    this.repulsionGradientProgram = new WebCLProgram({
-      gl,
-      cells: this.params.repulsionGridSize ** 2,
-      fragmentShaderSource: getRepulsionGradientFragmentShader({
-        graph,
-        gradientTextureSize: this.params.repulsionGridSize,
-      }),
-      vertexShaderSource: getVertexShader(),
-      dataTextures: ["nodesPosition", "nodesMetadata", "relevantGridPoints"],
-    });
     this.fa3Program = new WebCLProgram({
       gl,
-      cells: this.graph.order,
+      fragments: this.graph.order,
       fragmentShaderSource: getForceAtlas3FragmentShader({
         graph,
         maxNeighborsCount: this.maxNeighborsCount,
-        gradientTextureSize: this.params.repulsionGridSize,
         linLogMode: this.params.linLogMode,
         adjustSizes: this.params.adjustSizes,
         strongGravityMode: this.params.strongGravityMode,
         outboundAttractionDistribution: this.params.outboundAttractionDistribution,
       }),
       vertexShaderSource: getVertexShader(),
-      dataTextures: ["nodesPosition", "nodesMetadata", "relevantGridPoints", "repulsionGradient", "edges"],
+      dataTextures: ["nodesPosition", "nodesMetadata", "nodesConvergence", "edges"],
+      outputTextures: ["nodesPosition", "nodesConvergence"],
     });
-
-    // Rebind textures:
-    const deadTexture = this.fa3Program.dataTextures.repulsionGradient;
-    this.fa3Program.dataTextures.repulsionGradient = this.repulsionGradientProgram.outputTexture;
-    this.repulsionGradientProgram.dataTextures.nodesMetadata = this.fa3Program.dataTextures.nodesMetadata;
-    gl.deleteTexture(deadTexture);
   }
 
   private readGraph() {
@@ -118,6 +99,7 @@ export class ForceAtlas2GPU<
       this.nodeDataCache[node] = {
         index: i,
         mass: 1,
+        convergence: 1,
       };
 
       neighborsPerSource[i] = [];
@@ -139,6 +121,7 @@ export class ForceAtlas2GPU<
     const edgesTextureSize = getTextureSize(graph.size * 2);
     this.nodesPositionArray = new Float32Array(4 * nodesTextureSize ** 2);
     this.nodesMetadataArray = new Float32Array(4 * nodesTextureSize ** 2);
+    this.nodesConvergenceArray = new Float32Array(4 * nodesTextureSize ** 2);
     this.edgesArray = new Float32Array(2 * edgesTextureSize ** 2);
 
     let k = 0;
@@ -146,7 +129,7 @@ export class ForceAtlas2GPU<
     this.maxNeighborsCount = 0;
     this.outboundAttCompensation = 0;
     graph.forEachNode((node, { x, y, size }: { x: number; y: number; size: number }) => {
-      const { index, mass } = this.nodeDataCache[node];
+      const { index, mass, convergence } = this.nodeDataCache[node];
       const neighbors = neighborsPerSource[index];
       const neighborsCount = neighbors.length;
       this.maxNeighborsCount = Math.max(this.maxNeighborsCount, neighborsCount);
@@ -154,6 +137,8 @@ export class ForceAtlas2GPU<
       k = index * 4;
       this.nodesPositionArray[k++] = x;
       this.nodesPositionArray[k++] = y;
+      this.nodesPositionArray[k++] = 0;
+      this.nodesPositionArray[k++] = 0;
 
       k = index * 4;
       this.nodesMetadataArray[k++] = mass;
@@ -161,6 +146,9 @@ export class ForceAtlas2GPU<
       this.nodesMetadataArray[k++] = edgeIndex;
       this.nodesMetadataArray[k++] = neighborsCount;
       this.outboundAttCompensation += mass;
+
+      k = index * 4;
+      this.nodesConvergenceArray[k++] = convergence;
 
       for (let j = 0; j < neighborsCount; j++) {
         const { weight, index } = neighbors[j];
@@ -172,135 +160,61 @@ export class ForceAtlas2GPU<
     });
 
     this.outboundAttCompensation /= graph.order;
-
-    this.indexGraph();
   }
 
-  private indexGraph(updatePositions?: boolean) {
-    const {
-      graph,
-      params: { repulsionGridSize, gridMargin },
-    } = this;
+  private updateGraph() {
+    const { graph } = this;
 
-    const newPositions = updatePositions ? this.fa3Program.getOutput() : new Float32Array();
-
-    let xMin = Infinity;
-    let xMax = -Infinity;
-    let yMin = Infinity;
-    let yMax = -Infinity;
-    this.relevantGridPointsArray = new Float32Array(repulsionGridSize ** 2);
+    const nodesPosition = this.fa3Program.getOutput("nodesPosition");
 
     // Find grid boundaries:
-    graph.forEachNode((n, attr) => {
-      let x: number, y: number;
+    graph.forEachNode((n) => {
+      const { index } = this.nodeDataCache[n];
+      const x = nodesPosition[4 * index];
+      const y = nodesPosition[4 * index + 1];
 
-      if (updatePositions) {
-        const { index } = this.nodeDataCache[n];
-        x = newPositions[4 * index];
-        y = newPositions[4 * index + 1];
-
-        graph.mergeNodeAttributes(n, {
-          x,
-          y,
-        });
-      } else {
-        x = attr.x;
-        y = attr.y;
-      }
-
-      xMin = Math.min(x, xMin);
-      xMax = Math.max(x, xMax);
-      yMin = Math.min(y, yMin);
-      yMax = Math.max(y, yMax);
+      graph.mergeNodeAttributes(n, {
+        x,
+        y,
+      });
     });
-
-    const rawWidth = xMax - xMin;
-    const rawHeight = yMax - yMin;
-    const xMargin = rawWidth * gridMargin;
-    const yMargin = rawHeight * gridMargin;
-    this.stageDimensions = {
-      width: rawWidth + 2 * xMargin,
-      height: rawHeight + 2 * yMargin,
-    };
-    this.stageOffset = {
-      x: xMin - xMargin,
-      y: yMin - yMargin,
-    };
-
-    // Find grid empty cells, and nodes mass barycenter:
-    let totalMass = 0;
-    let xWeightedSum = 0;
-    let yWeightedSum = 0;
-    graph.forEachNode((_n, { x, y, mass }) => {
-      totalMass += mass;
-      xWeightedSum += mass * x;
-      yWeightedSum += mass * y;
-
-      // Find closest grid point:
-      const col = Math.round(((x - this.stageOffset.x) / this.stageDimensions.width) * repulsionGridSize);
-      const row = Math.round(((y - this.stageOffset.y) / this.stageDimensions.height) * repulsionGridSize);
-
-      // Mark the point as non-empty:
-      this.relevantGridPointsArray[row * repulsionGridSize + col] = 1;
-    });
-
-    this.barycenter = {
-      x: xWeightedSum / totalMass,
-      y: yWeightedSum / totalMass,
-      mass: totalMass,
-    };
   }
 
   private swapFA3Textures() {
     const { fa3Program } = this;
 
-    [fa3Program.dataTextures.nodesPosition, fa3Program.outputTexture] = [
-      fa3Program.outputTexture,
+    [fa3Program.dataTextures.nodesPosition, fa3Program.outputTextures.nodesPosition] = [
+      fa3Program.outputTextures.nodesPosition,
       fa3Program.dataTextures.nodesPosition,
+    ];
+    [fa3Program.dataTextures.nodesConvergence, fa3Program.outputTextures.nodesConvergence] = [
+      fa3Program.outputTextures.nodesConvergence,
+      fa3Program.dataTextures.nodesConvergence,
     ];
   }
 
-  private iterate() {
-    const { repulsionGradientProgram, fa3Program, params, stageDimensions, stageOffset } = this;
+  private step(iterations = 1) {
+    const { fa3Program, params } = this;
+    let iterationsLeft = iterations;
+    if (!this.isRunning) {
+      this.stop();
+      return;
+    }
 
-    const fa3Uniforms = {
-      stageDimensions: [stageDimensions.width, stageDimensions.height],
-      stageOffset: [stageOffset.x, stageOffset.y],
-      outboundAttCompensation: this.outboundAttCompensation,
-    };
-    UNIFORM_SETTINGS.forEach((setting) => (fa3Uniforms[setting] = this.params[setting]));
-    fa3Program.setUniforms(fa3Uniforms);
+    while (iterationsLeft-- > 0) {
+      const fa3Uniforms = {
+        outboundAttCompensation: this.outboundAttCompensation,
+      };
+      UNIFORM_SETTINGS.forEach((setting) => (fa3Uniforms[setting] = params[setting]));
 
-    // Compute repulsion gradient:
-    repulsionGradientProgram.dataTextures.nodesPosition = fa3Program.dataTextures.nodesPosition;
-    repulsionGradientProgram.activate();
-    repulsionGradientProgram.prepare();
-    repulsionGradientProgram.setUniforms(fa3Uniforms);
-    repulsionGradientProgram.compute();
-
-    // Compute FA3 steps:
-    fa3Program.dataTextures.repulsionGradient = repulsionGradientProgram.outputTexture;
-    let remainingFA3Step = params.stepsPerRepulsionStep;
-    while (remainingFA3Step-- > 0) {
+      fa3Program.setUniforms(fa3Uniforms);
       fa3Program.prepare();
       fa3Program.compute();
 
-      if (remainingFA3Step > 0) this.swapFA3Textures();
-    }
-
-    this.indexGraph(false);
-  }
-
-  private step(iterations = 1) {
-    let iterationsLeft = iterations;
-    if (!this.isRunning) return;
-
-    while (iterationsLeft-- > 0) {
-      this.iterate();
-
       if (iterationsLeft > 0) this.swapFA3Textures();
     }
-    this.indexGraph(true);
+    this.updateGraph();
+    this.swapFA3Textures();
 
     if (this.remainingSteps--) this.animationFrameID = setTimeout(() => this.step(iterations), 0);
   }
@@ -310,10 +224,14 @@ export class ForceAtlas2GPU<
    * ***********
    */
   public start() {
-    this.remainingSteps = 2;
+    this.remainingSteps = 4;
     this.isRunning = true;
     this.fa3Program.setTextureData("nodesPosition", this.nodesPositionArray, this.graph.order, 4);
     this.fa3Program.setTextureData("nodesMetadata", this.nodesMetadataArray, this.graph.order, 4);
+    this.fa3Program.setTextureData("nodesConvergence", this.nodesConvergenceArray, this.graph.order, 4);
+    this.fa3Program.setTextureData("edges", this.edgesArray, this.graph.size, 2);
+
+    this.fa3Program.activate();
     this.step(this.params.iterationsPerStep);
   }
 
