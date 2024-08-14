@@ -31,7 +31,6 @@ async function init() {
 
   const container = document.getElementById("stage") as HTMLDivElement;
   const fa2 = new ForceAtlas2GPU(graph, {
-    // barnesHutOptimize: true
     // gravity: 0.05,
     // scalingRatio: 10,
     // slowDown: 1 + Math.log(graph.order),

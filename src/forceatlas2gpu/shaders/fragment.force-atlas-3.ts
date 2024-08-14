@@ -28,8 +28,8 @@ ${strongGravityMode ? "#define STRONG_GRAVITY_MODE" : ""}
 
 // Graph data:
 uniform sampler2D u_nodesPositionTexture;
+uniform sampler2D u_nodesMovementTexture;
 uniform sampler2D u_nodesMetadataTexture;
-uniform sampler2D u_nodesConvergenceTexture;
 uniform sampler2D u_edgesTexture;
 in vec2 v_textureCoord;
 
@@ -46,7 +46,7 @@ uniform float u_slowDown;
 
 // Output
 layout(location = 0) out vec4 positionOutput;
-layout(location = 1) out vec4 convergenceOutput;
+layout(location = 1) out vec4 movementOutput;
 
 vec4 getValueInTexture(sampler2D inputTexture, float index, float textureSize) {
   float row = floor(index / textureSize);
@@ -73,8 +73,11 @@ void main() {
   vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, nodeIndex, NODES_TEXTURE_SIZE);
   float x = nodePosition.x;
   float y = nodePosition.y;
-  float oldDx = nodePosition.z;
-  float oldDy = nodePosition.w;
+
+  vec3 nodeMovement = getValueInTexture(u_nodesMovementTexture, nodeIndex, NODES_TEXTURE_SIZE).xyz;
+  float oldDx = nodeMovement.x;
+  float oldDy = nodeMovement.y;
+  float nodeConvergence = nodeMovement.z;
   float dx = 0.0;
   float dy = 0.0;
   
@@ -83,8 +86,6 @@ void main() {
   float nodeSize = nodeMetadata.g;
   float edgesOffset = nodeMetadata.b;
   float neighborsCount = nodeMetadata.a;
-
-  float nodeConvergence = getValueInTexture(u_nodesConvergenceTexture, nodeIndex, NODES_TEXTURE_SIZE).x;
 
   // REPULSION:
   float repulsionCoefficient = u_scalingRatio;
@@ -224,19 +225,20 @@ void main() {
   #else
     float nodeSpeed = (nodeConvergence * log(1.0 + traction)) * swingingFactor;
     // Store new node convergence:
-    convergenceOutput.x = min(
+    movementOutput.z = min(
       1.0,
       sqrt(nodeSpeed * forceSquared * swingingFactor)
     );
   #endif
   
-  // Store new node coordinates:
   dx = dx * nodeSpeed / u_slowDown;
   dy = dy * nodeSpeed / u_slowDown;
+  
   positionOutput.x = x + dx;
   positionOutput.y = y + dy;
-  positionOutput.z = dx;
-  positionOutput.w = dy;
+  
+  movementOutput.x = dx;
+  movementOutput.y = dy;
 }`;
 
   return SHADER;

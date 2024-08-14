@@ -10,6 +10,13 @@ import { WebCLProgram } from "./webcl-program";
 export * from "./consts";
 export * from "./utils";
 
+const ATTRIBUTES_PER_ITEM = {
+  nodesPosition: 2,
+  nodesMovement: 4,
+  nodesMetadata: 4,
+  edges: 2,
+} as const;
+
 export class ForceAtlas2GPU<
   NodeAttributes extends Attributes = Attributes,
   EdgeAttributes extends Attributes = Attributes,
@@ -36,14 +43,14 @@ export class ForceAtlas2GPU<
     }
   >;
   private nodesPositionArray: Float32Array;
+  private nodesMovementArray: Float32Array;
   private nodesMetadataArray: Float32Array;
-  private nodesConvergenceArray: Float32Array;
   private edgesArray: Float32Array;
 
   // Programs:
   private fa3Program: WebCLProgram<
-    "nodesPosition" | "nodesMetadata" | "nodesConvergence" | "edges",
-    "nodesPosition" | "nodesConvergence"
+    "nodesPosition" | "nodesMovement" | "nodesMetadata" | "edges",
+    "nodesPosition" | "nodesMovement"
   >;
 
   constructor(graph: Graph<NodeAttributes, EdgeAttributes>, params: Partial<ForceAtlas2Settings> = {}) {
@@ -84,8 +91,16 @@ export class ForceAtlas2GPU<
         outboundAttractionDistribution: this.params.outboundAttractionDistribution,
       }),
       vertexShaderSource: getVertexShader(),
-      dataTextures: ["nodesPosition", "nodesMetadata", "nodesConvergence", "edges"],
-      outputTextures: ["nodesPosition", "nodesConvergence"],
+      dataTextures: [
+        { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition },
+        { name: "nodesMovement", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMovement },
+        { name: "nodesMetadata", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMetadata },
+        { name: "edges", attributesPerItem: ATTRIBUTES_PER_ITEM.edges },
+      ],
+      outputTextures: [
+        { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition },
+        { name: "nodesMovement", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMovement },
+      ],
     });
   }
 
@@ -119,10 +134,10 @@ export class ForceAtlas2GPU<
 
     const nodesTextureSize = getTextureSize(graph.order);
     const edgesTextureSize = getTextureSize(graph.size * 2);
-    this.nodesPositionArray = new Float32Array(4 * nodesTextureSize ** 2);
-    this.nodesMetadataArray = new Float32Array(4 * nodesTextureSize ** 2);
-    this.nodesConvergenceArray = new Float32Array(4 * nodesTextureSize ** 2);
-    this.edgesArray = new Float32Array(2 * edgesTextureSize ** 2);
+    this.nodesPositionArray = new Float32Array(ATTRIBUTES_PER_ITEM.nodesPosition * nodesTextureSize ** 2);
+    this.nodesMovementArray = new Float32Array(ATTRIBUTES_PER_ITEM.nodesMovement * nodesTextureSize ** 2);
+    this.nodesMetadataArray = new Float32Array(ATTRIBUTES_PER_ITEM.nodesMetadata * nodesTextureSize ** 2);
+    this.edgesArray = new Float32Array(ATTRIBUTES_PER_ITEM.edges * edgesTextureSize ** 2);
 
     let k = 0;
     let edgeIndex = 0;
@@ -134,25 +149,25 @@ export class ForceAtlas2GPU<
       const neighborsCount = neighbors.length;
       this.maxNeighborsCount = Math.max(this.maxNeighborsCount, neighborsCount);
 
-      k = index * 4;
+      k = index * ATTRIBUTES_PER_ITEM.nodesPosition;
       this.nodesPositionArray[k++] = x;
       this.nodesPositionArray[k++] = y;
-      this.nodesPositionArray[k++] = 0;
-      this.nodesPositionArray[k++] = 0;
 
-      k = index * 4;
+      k = index * ATTRIBUTES_PER_ITEM.nodesMovement;
+      this.nodesMovementArray[k++] = 0;
+      this.nodesMovementArray[k++] = 0;
+      this.nodesMovementArray[k++] = convergence;
+
+      k = index * ATTRIBUTES_PER_ITEM.nodesMetadata;
       this.nodesMetadataArray[k++] = mass;
       this.nodesMetadataArray[k++] = size;
       this.nodesMetadataArray[k++] = edgeIndex;
       this.nodesMetadataArray[k++] = neighborsCount;
       this.outboundAttCompensation += mass;
 
-      k = index * 4;
-      this.nodesConvergenceArray[k++] = convergence;
-
       for (let j = 0; j < neighborsCount; j++) {
         const { weight, index } = neighbors[j];
-        k = edgeIndex * 2;
+        k = edgeIndex * ATTRIBUTES_PER_ITEM.edges;
         this.edgesArray[k++] = index;
         this.edgesArray[k++] = weight;
         edgeIndex++;
@@ -167,11 +182,10 @@ export class ForceAtlas2GPU<
 
     const nodesPosition = this.fa3Program.getOutput("nodesPosition");
 
-    // Find grid boundaries:
     graph.forEachNode((n) => {
       const { index } = this.nodeDataCache[n];
-      const x = nodesPosition[4 * index];
-      const y = nodesPosition[4 * index + 1];
+      const x = nodesPosition[2 * index];
+      const y = nodesPosition[2 * index + 1];
 
       graph.mergeNodeAttributes(n, {
         x,
@@ -183,13 +197,13 @@ export class ForceAtlas2GPU<
   private swapFA3Textures() {
     const { fa3Program } = this;
 
-    [fa3Program.dataTextures.nodesPosition, fa3Program.outputTextures.nodesPosition] = [
-      fa3Program.outputTextures.nodesPosition,
-      fa3Program.dataTextures.nodesPosition,
+    [fa3Program.dataTexturesIndex.nodesPosition.texture, fa3Program.outputTexturesIndex.nodesPosition.texture] = [
+      fa3Program.outputTexturesIndex.nodesPosition.texture,
+      fa3Program.dataTexturesIndex.nodesPosition.texture,
     ];
-    [fa3Program.dataTextures.nodesConvergence, fa3Program.outputTextures.nodesConvergence] = [
-      fa3Program.outputTextures.nodesConvergence,
-      fa3Program.dataTextures.nodesConvergence,
+    [fa3Program.dataTexturesIndex.nodesMovement.texture, fa3Program.outputTexturesIndex.nodesMovement.texture] = [
+      fa3Program.outputTexturesIndex.nodesMovement.texture,
+      fa3Program.dataTexturesIndex.nodesMovement.texture,
     ];
   }
 
@@ -224,12 +238,12 @@ export class ForceAtlas2GPU<
    * ***********
    */
   public start() {
-    this.remainingSteps = 4;
+    this.remainingSteps = 1;
     this.isRunning = true;
-    this.fa3Program.setTextureData("nodesPosition", this.nodesPositionArray, this.graph.order, 4);
-    this.fa3Program.setTextureData("nodesMetadata", this.nodesMetadataArray, this.graph.order, 4);
-    this.fa3Program.setTextureData("nodesConvergence", this.nodesConvergenceArray, this.graph.order, 4);
-    this.fa3Program.setTextureData("edges", this.edgesArray, this.graph.size, 2);
+    this.fa3Program.setTextureData("nodesPosition", this.nodesPositionArray, this.graph.order);
+    this.fa3Program.setTextureData("nodesMovement", this.nodesMovementArray, this.graph.order);
+    this.fa3Program.setTextureData("nodesMetadata", this.nodesMetadataArray, this.graph.order);
+    this.fa3Program.setTextureData("edges", this.edgesArray, this.graph.size);
 
     this.fa3Program.activate();
     this.step(this.params.iterationsPerStep);
