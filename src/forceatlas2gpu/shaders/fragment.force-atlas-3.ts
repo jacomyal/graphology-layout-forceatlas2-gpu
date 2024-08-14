@@ -8,20 +8,21 @@ export function getForceAtlas3FragmentShader({
   linLogMode,
   adjustSizes,
   strongGravityMode,
+  outboundAttractionDistribution,
 }: {
   graph: Graph;
 } & ForceAtlas2Flags) {
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
-precision highp float;
+precision mediump float;
 
 #define NODES_COUNT ${numberToGLSLFloat(graph.order)}
-#define EDGES_COUNT ${numberToGLSLFloat(graph.size)}
 #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.order))}
-#define EDGES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.size * 2))}
+#define EDGES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.size))}
 ${linLogMode ? "#define LINLOG_MODE" : ""}
 ${adjustSizes ? "#define ADJUST_SIZES" : ""}
 ${strongGravityMode ? "#define STRONG_GRAVITY_MODE" : ""}
+${outboundAttractionDistribution ? "#define OUTBOUND_ATTRACTION_DISTRIBUTION" : ""}
 
 // Graph data:
 uniform sampler2D u_nodesPositionTexture;
@@ -65,7 +66,7 @@ float getIndex(vec2 positionInTexture, float textureSize) {
 
 void main() {
   float nodeIndex = getIndex(v_textureCoord, NODES_TEXTURE_SIZE);
-  if (nodeIndex > NODES_COUNT) return;
+  if (nodeIndex >= NODES_COUNT) return;
 
   vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, nodeIndex, NODES_TEXTURE_SIZE);
   float x = nodePosition.x;
@@ -97,20 +98,20 @@ void main() {
       float factor = 0.0;
 
       #ifdef ADJUST_SIZES
-      // Anticollision Linear Repulsion
-      float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
-      if (d > 0.0) {
-        factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
-      } else if (d < 0.0) {
-        factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
-      }
+        // Anticollision Linear Repulsion
+        float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
+        if (d > 0.0) {
+          factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
+        } else if (d < 0.0) {
+          factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
+        }
 
       #else
-      // Linear Repulsion
-      float dSquare = dot(diff, diff);
-      if (dSquare > 0.0) {
-        factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
-      }
+        // Linear Repulsion
+        float dSquare = dot(diff, diff);
+        if (dSquare > 0.0) {
+          factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
+        }
       #endif
 
       dx += diff.x * factor;
@@ -121,12 +122,10 @@ void main() {
   // GRAVITY:
   float distanceToCenter = sqrt(x * x + y * y);
   float gravityFactor = 0.0;
-  float gravityCoefficient = u_scalingRatio;
-  float g = u_gravity / u_scalingRatio;
   #ifdef STRONG_GRAVITY_MODE
-    if (distanceToCenter > 0.0) gravityFactor = gravityCoefficient * nodeMass * g;
+    if (distanceToCenter > 0.0) gravityFactor = nodeMass * u_gravity;
   #else
-    if (distanceToCenter > 0.0) gravityFactor = gravityCoefficient * nodeMass * g / distanceToCenter;
+    if (distanceToCenter > 0.0) gravityFactor = nodeMass * u_gravity / distanceToCenter;
   #endif
 
   dx -= x * gravityFactor;
@@ -140,13 +139,12 @@ void main() {
   #endif
 
   for (float j = 0.0; j < neighborsCount; j++) {
-    vec2 edgeData = getValueInTexture(u_edgesTexture, j + edgesOffset, EDGES_TEXTURE_SIZE).xy;
+    vec2 edgeData = getValueInTexture(u_edgesTexture, edgesOffset + j, EDGES_TEXTURE_SIZE).xy;
     float otherNodeIndex = edgeData.x;
     float weight = edgeData.y;
     float edgeWeightInfluence = pow(weight, u_edgeWeightInfluence);
 
     vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
-
     vec2 diff = nodePosition.xy - otherNodePosition.xy;
 
     #ifdef ADJUST_SIZES
@@ -162,13 +160,13 @@ void main() {
       #ifdef OUTBOUND_ATTRACTION_DISTRIBUTION
         // LinLog Degree Distributed Anti-collision Attraction
         if (d > 0.0) {
-          attractionFactor = (-attractionCoefficient * edgeWeightInfluence * log(1 + d)) / d / nodeMass;
+          attractionFactor = (-attractionCoefficient * edgeWeightInfluence * log(1.0 + d)) / d / nodeMass;
         }
 
       #else
         // LinLog Anti-collision Attraction
         if (d > 0.0) {
-          attractionFactor = (-attractionCoefficient * edgeWeightInfluence * log(1 + d)) / d;
+          attractionFactor = (-attractionCoefficient * edgeWeightInfluence * log(1.0 + d)) / d;
         }
       #endif
 

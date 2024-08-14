@@ -5,6 +5,7 @@ import Sigma from "sigma";
 
 import { ForceAtlas2GPU } from "../src";
 import data from "./public/les-miserables.json";
+console.log(data)
 
 async function init() {
   // const PARAMS = {
@@ -36,18 +37,20 @@ async function init() {
   const container = document.getElementById("stage") as HTMLDivElement;
   const fa2 = new ForceAtlas2GPU(graph, {
     gravity: 0.05,
-    scalingRatio: 100,
-    // slowDown: 1 + Math.log(graph.order),
+    scalingRatio: 10,
+    slowDown: 1 + Math.log(graph.order),
+    adjustSizes: true,
     strongGravityMode: true,
-    // adjustSizes: true,
-    outboundAttractionDistribution: false,
+    iterationsPerStep: 100
+    // linLogMode: true,
+    // outboundAttractionDistribution: true,
   });
   const _renderer = new Sigma(graph, container, {
     itemSizesReference: "positions",
     zoomToSizeRatioFunction: (x) => x,
   });
 
-  fa2.start();
+  fa2.start(1000);
 
   return "FA2 was initialized properly";
 }

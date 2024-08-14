@@ -1,25 +1,3 @@
-import Graph from "graphology";
-
-export const DATA_TEXTURES = [
-  // For each node: x, y
-  "nodesPosition",
-  // For each node: mass, size, firstEdgePosition, edgesCount
-  "nodesMetadata",
-  // For each edge: target, weight
-  "edges",
-] as const;
-
-export type TextureName = (typeof DATA_TEXTURES)[number];
-
-export const DATA_TEXTURES_SPECS: Record<
-  TextureName,
-  { attributesPerItem: number; getItemsCount: (graph: Graph) => number }
-> = {
-  nodesPosition: { attributesPerItem: 2, getItemsCount: (graph: Graph) => graph.order },
-  nodesMetadata: { attributesPerItem: 4, getItemsCount: (graph: Graph) => graph.order },
-  edges: { attributesPerItem: 2, getItemsCount: (graph: Graph) => graph.size * 2 },
-};
-
 export const DATA_TEXTURES_LEVELS = {
   1: WebGL2RenderingContext.R32F,
   2: WebGL2RenderingContext.RG32F,
