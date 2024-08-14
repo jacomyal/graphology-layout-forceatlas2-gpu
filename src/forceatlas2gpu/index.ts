@@ -4,14 +4,14 @@ import { Attributes } from "graphology-types";
 import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
 import { getForceAtlas3FragmentShader } from "./shaders/fragment.force-atlas-3";
 import { getVertexShader } from "./shaders/vertex.basic";
-import { getTextureSize } from "./utils";
+import { getTextureSize, waitForGPUCompletion } from "./utils";
 import { WebCLProgram } from "./webcl-program";
 
 export * from "./consts";
 export * from "./utils";
 
 const ATTRIBUTES_PER_ITEM = {
-  nodesPosition: 2,
+  nodesPosition: 4,
   nodesMovement: 4,
   nodesMetadata: 4,
   edges: 2,
@@ -166,7 +166,7 @@ export class ForceAtlas2GPU<
       this.outboundAttCompensation += mass;
 
       for (let j = 0; j < neighborsCount; j++) {
-        const { weight, index } = neighbors[j];
+        const { weight = 1, index } = neighbors[j];
         k = edgeIndex * ATTRIBUTES_PER_ITEM.edges;
         this.edgesArray[k++] = index;
         this.edgesArray[k++] = weight;
@@ -177,15 +177,16 @@ export class ForceAtlas2GPU<
     this.outboundAttCompensation /= graph.order;
   }
 
-  private updateGraph() {
+  private async updateGraph() {
     const { graph } = this;
 
+    await waitForGPUCompletion(this.gl);
     const nodesPosition = this.fa3Program.getOutput("nodesPosition");
 
     graph.forEachNode((n) => {
       const { index } = this.nodeDataCache[n];
-      const x = nodesPosition[2 * index];
-      const y = nodesPosition[2 * index + 1];
+      const x = nodesPosition[ATTRIBUTES_PER_ITEM.nodesPosition * index];
+      const y = nodesPosition[ATTRIBUTES_PER_ITEM.nodesPosition * index + 1];
 
       graph.mergeNodeAttributes(n, {
         x,
@@ -207,30 +208,35 @@ export class ForceAtlas2GPU<
     ];
   }
 
-  private step(iterations = 1) {
+  private async step() {
     const { fa3Program, params } = this;
-    let iterationsLeft = iterations;
-    if (!this.isRunning) {
-      this.stop();
-      return;
-    }
+    const { iterationsPerStep } = params;
 
-    while (iterationsLeft-- > 0) {
+    let remainingIterations = iterationsPerStep;
+
+    while (remainingIterations-- > 0) {
+      if (!this.isRunning) {
+        this.stop();
+        return;
+      }
+
       const fa3Uniforms = {
         outboundAttCompensation: this.outboundAttCompensation,
       };
       UNIFORM_SETTINGS.forEach((setting) => (fa3Uniforms[setting] = params[setting]));
 
+      // console.log("Compute", fa3Uniforms);
       fa3Program.setUniforms(fa3Uniforms);
       fa3Program.prepare();
       fa3Program.compute();
 
-      if (iterationsLeft > 0) this.swapFA3Textures();
+      if (remainingIterations > 0) this.swapFA3Textures();
     }
-    this.updateGraph();
+    // console.log(`Update graph (${iterationsPerStep} iterations)`);
+    await this.updateGraph();
     this.swapFA3Textures();
 
-    if (this.remainingSteps--) this.animationFrameID = setTimeout(() => this.step(iterations), 0);
+    if (this.remainingSteps--) this.animationFrameID = setTimeout(() => this.step(), 0);
   }
 
   /**
@@ -238,7 +244,7 @@ export class ForceAtlas2GPU<
    * ***********
    */
   public start() {
-    this.remainingSteps = 1;
+    this.remainingSteps = 10000;
     this.isRunning = true;
     this.fa3Program.setTextureData("nodesPosition", this.nodesPositionArray, this.graph.order);
     this.fa3Program.setTextureData("nodesMovement", this.nodesMovementArray, this.graph.order);
@@ -246,7 +252,7 @@ export class ForceAtlas2GPU<
     this.fa3Program.setTextureData("edges", this.edgesArray, this.graph.size);
 
     this.fa3Program.activate();
-    this.step(this.params.iterationsPerStep);
+    this.step();
   }
 
   public stop() {

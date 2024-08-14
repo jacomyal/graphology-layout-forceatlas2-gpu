@@ -62,7 +62,7 @@ export const DEFAULT_FORCE_ATLAS_2_CURSORS: ForceAtlas2Cursors = {
   gravity: 1,
   slowDown: 1,
   maxForce: 10,
-  iterationsPerStep: 1,
+  iterationsPerStep: 10,
 };
 export const DEFAULT_FORCE_ATLAS_2_SETTINGS = {
   ...DEFAULT_FORCE_ATLAS_2_FLAGS,

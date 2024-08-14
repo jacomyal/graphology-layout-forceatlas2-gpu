@@ -5,13 +5,11 @@ import { getTextureSize, numberToGLSLFloat } from "../utils";
 
 export function getForceAtlas3FragmentShader({
   graph,
-  maxNeighborsCount,
   linLogMode,
   adjustSizes,
   strongGravityMode,
 }: {
   graph: Graph;
-  maxNeighborsCount: number;
 } & ForceAtlas2Flags) {
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
@@ -19,7 +17,6 @@ precision highp float;
 
 #define NODES_COUNT ${numberToGLSLFloat(graph.order)}
 #define EDGES_COUNT ${numberToGLSLFloat(graph.size)}
-#define MAX_NEIGHBORS_COUNT ${numberToGLSLFloat(maxNeighborsCount)}
 #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.order))}
 #define EDGES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.size * 2))}
 ${linLogMode ? "#define LINLOG_MODE" : ""}
@@ -74,7 +71,7 @@ void main() {
   float x = nodePosition.x;
   float y = nodePosition.y;
 
-  vec3 nodeMovement = getValueInTexture(u_nodesMovementTexture, nodeIndex, NODES_TEXTURE_SIZE).xyz;
+  vec4 nodeMovement = getValueInTexture(u_nodesMovementTexture, nodeIndex, NODES_TEXTURE_SIZE);
   float oldDx = nodeMovement.x;
   float oldDy = nodeMovement.y;
   float nodeConvergence = nodeMovement.z;
@@ -92,7 +89,7 @@ void main() {
   for (float j = 0.0; j < NODES_COUNT; j++) {
     if (j != nodeIndex) {
       vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
-      vec3 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, j, NODES_TEXTURE_SIZE).rgb;
+      vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, j, NODES_TEXTURE_SIZE);
       float otherNodeMass = otherNodeMetadata.r;
       float otherNodeSize = otherNodeMetadata.g;
 
@@ -142,9 +139,7 @@ void main() {
     float attractionCoefficient = 1.0;
   #endif
 
-  for (float j = 0.0; j < MAX_NEIGHBORS_COUNT; j++) {
-    if (j >= neighborsCount) break;
-
+  for (float j = 0.0; j < neighborsCount; j++) {
     vec2 edgeData = getValueInTexture(u_edgesTexture, j + edgesOffset, EDGES_TEXTURE_SIZE).xy;
     float otherNodeIndex = edgeData.x;
     float weight = edgeData.y;
