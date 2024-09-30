@@ -1,5 +1,5 @@
 import { DATA_TEXTURES_FORMATS, DATA_TEXTURES_LEVELS } from "./consts";
-import { compileShader, getTextureSize, waitForGPUCompletion } from "./utils";
+import { compileShader, getTextureSize } from "./utils";
 
 export class WebCLProgram<
   DATA_TEXTURE extends string = string,
@@ -10,7 +10,7 @@ export class WebCLProgram<
   public gl: WebGL2RenderingContext;
   public size: number;
 
-  public uniformLocations: Record<UNIFORM, WebGLUniformLocation> = {};
+  public uniformLocations: Partial<Record<UNIFORM, WebGLUniformLocation>> = {};
 
   public dataTextures: { name: DATA_TEXTURE; attributesPerItem: number; index: number; texture: WebGLTexture }[];
   public dataTexturesIndex: Record<DATA_TEXTURE, (typeof this.dataTextures)[number]>;
@@ -41,10 +41,24 @@ export class WebCLProgram<
   }) {
     this.gl = gl;
     this.size = getTextureSize(fragments);
-    this.dataTextures = dataTextures.map((spec, index) => ({ ...spec, index, texture: gl.createTexture() }));
-    this.dataTexturesIndex = this.dataTextures.reduce((iter, spec) => ({ ...iter, [spec.name]: spec }), {});
-    this.outputTextures = outputTextures.map((spec, index) => ({ ...spec, index, texture: gl.createTexture() }));
-    this.outputTexturesIndex = this.outputTextures.reduce((iter, spec) => ({ ...iter, [spec.name]: spec }), {});
+    this.dataTextures = dataTextures.map((spec, index) => ({
+      ...spec,
+      index,
+      texture: gl.createTexture() as WebGLTexture,
+    }));
+    this.dataTexturesIndex = this.dataTextures.reduce(
+      (iter, spec) => ({ ...iter, [spec.name]: spec }),
+      {} as typeof this.dataTexturesIndex,
+    );
+    this.outputTextures = outputTextures.map((spec, index) => ({
+      ...spec,
+      index,
+      texture: gl.createTexture() as WebGLTexture,
+    }));
+    this.outputTexturesIndex = this.outputTextures.reduce(
+      (iter, spec) => ({ ...iter, [spec.name]: spec }),
+      {} as typeof this.outputTexturesIndex,
+    );
 
     // Instantiate program:
     this.program = gl.createProgram() as WebGLProgram;
@@ -62,7 +76,7 @@ export class WebCLProgram<
     }
 
     // Handle output:
-    this.outputBuffer = gl.createFramebuffer();
+    this.outputBuffer = gl.createFramebuffer() as WebGLBuffer;
 
     // Create a buffer for the positions.
     const positionLocation = gl.getAttribLocation(this.program, "a_position");
@@ -122,9 +136,15 @@ export class WebCLProgram<
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl[`COLOR_ATTACHMENT${index}`], gl.TEXTURE_2D, texture, 0);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl[`COLOR_ATTACHMENT${index}` as "COLOR_ATTACHMENT0"],
+        gl.TEXTURE_2D,
+        texture,
+        0,
+      );
     });
-    gl.drawBuffers(this.outputTextures.map((_, i) => gl[`COLOR_ATTACHMENT${i}`]));
+    gl.drawBuffers(this.outputTextures.map((_, i) => gl[`COLOR_ATTACHMENT${i}` as "COLOR_ATTACHMENT0"]));
   }
 
   public setUniforms(uniforms: Record<UNIFORM, unknown>) {
@@ -132,15 +152,16 @@ export class WebCLProgram<
 
     for (const uniform in uniforms) {
       const val: unknown = uniforms[uniform];
-      const location = this.uniformLocations[uniform] || gl.getUniformLocation(this.program, `u_${uniform}`);
+      const location =
+        this.uniformLocations[uniform] || (gl.getUniformLocation(this.program, `u_${uniform}`) as WebGLUniformLocation);
       this.uniformLocations[uniform] = location;
 
       if (typeof val === "number") {
         gl.uniform1f(location, val);
       } else if (Array.isArray(val) && val.every((v) => typeof v === "number")) {
-        if (val.length === 2) gl.uniform2f(location, ...val);
-        else if (val.length === 3) gl.uniform3f(location, ...val);
-        else if (val.length === 4) gl.uniform4f(location, ...val);
+        if (val.length === 2) gl.uniform2f(location, val[0], val[1]);
+        else if (val.length === 3) gl.uniform3f(location, val[0], val[1], val[2]);
+        else if (val.length === 4) gl.uniform4f(location, val[0], val[1], val[2], val[3]);
       }
     }
   }
@@ -168,16 +189,16 @@ export class WebCLProgram<
   public compute() {
     const { gl, outputTextures, dataTextures } = this;
 
-    outputTextures.forEach((textureName, i) => {
+    outputTextures.forEach((outputTexture, i) => {
       gl.activeTexture(gl.TEXTURE0 + dataTextures.length + i);
-      gl.bindTexture(gl.TEXTURE_2D, outputTextures[textureName]);
+      gl.bindTexture(gl.TEXTURE_2D, outputTexture.texture);
     });
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
   public getOutputs() {
-    const res: Record<OUTPUT_TEXTURE, Float32Array> = {};
+    const res: Partial<Record<OUTPUT_TEXTURE, Float32Array>> = {};
     this.outputTextures.forEach(({ name }) => {
       res[name] = this.getOutput(name);
     });
@@ -190,7 +211,7 @@ export class WebCLProgram<
     const { attributesPerItem, index } = this.outputTexturesIndex[textureName];
 
     const outputArr = new Float32Array(size * size * attributesPerItem);
-    gl.readBuffer(gl[`COLOR_ATTACHMENT${index}`]);
+    gl.readBuffer(gl[`COLOR_ATTACHMENT${index}` as "COLOR_ATTACHMENT0"]);
     gl.readPixels(0, 0, size, size, DATA_TEXTURES_FORMATS[attributesPerItem], gl.FLOAT, outputArr);
 
     return outputArr;
@@ -204,13 +225,13 @@ export class WebCLProgram<
       gl.deleteTexture(texture);
     });
     this.dataTextures = [];
-    this.dataTexturesIndex = {};
+    this.dataTexturesIndex = {} as typeof this.dataTexturesIndex;
 
     gl.deleteBuffer(this.outputBuffer);
     this.outputTextures.forEach(({ texture }) => {
       gl.deleteTexture(texture);
     });
     this.outputTextures = [];
-    this.outputTexturesIndex = {};
+    this.outputTexturesIndex = {} as typeof this.outputTexturesIndex;
   }
 }
