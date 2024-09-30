@@ -1,11 +1,14 @@
 import Graph from "graphology";
-import { Attributes } from "graphology-types";
+import { EdgeDisplayData, NodeDisplayData } from "sigma/types";
 
-import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
-import { getForceAtlas2FragmentShader } from "./shaders/fragment.force-atlas-2";
-import { getVertexShader } from "./shaders/vertex.basic";
+
+
+import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Cursors, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
+import { getForceAtlas2FragmentShader } from "./shaders/fragment-force-atlas-2";
+import { getVertexShader } from "./shaders/vertex-basic";
 import { getTextureSize, waitForGPUCompletion } from "./utils";
 import { WebCLProgram } from "./webcl-program";
+
 
 export * from "./consts";
 export * from "./utils";
@@ -17,23 +20,22 @@ const ATTRIBUTES_PER_ITEM = {
   edges: 2,
 } as const;
 
-export class ForceAtlas2GPU<
-  NodeAttributes extends Attributes = Attributes,
-  EdgeAttributes extends Attributes = Attributes,
-> {
+export type ForceAtlas2Graph = Graph<NodeDisplayData, EdgeDisplayData & { weight?: number }>;
+
+export class ForceAtlas2GPU {
   private canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext;
 
   // Internal state:
   private remainingSteps = 0;
   private isRunning = false;
-  private animationFrameID: null | number;
+  private animationFrameID: null | number = null;
   private params: ForceAtlas2Settings;
 
   // Graph data and various caches:
-  private graph: Graph<NodeAttributes, EdgeAttributes>;
-  private maxNeighborsCount: number;
-  private outboundAttCompensation: number;
+  private graph: ForceAtlas2Graph;
+  private maxNeighborsCount: number = 0;
+  private outboundAttCompensation: number = 0;
   private nodeDataCache: Record<
     string,
     {
@@ -42,10 +44,10 @@ export class ForceAtlas2GPU<
       convergence: number;
     }
   >;
-  private nodesPositionArray: Float32Array;
-  private nodesMovementArray: Float32Array;
-  private nodesMetadataArray: Float32Array;
-  private edgesArray: Float32Array;
+  private nodesPositionArray: Float32Array = new Float32Array();
+  private nodesMovementArray: Float32Array = new Float32Array();
+  private nodesMetadataArray: Float32Array = new Float32Array();
+  private edgesArray: Float32Array = new Float32Array();
 
   // Programs:
   private fa2Program: WebCLProgram<
@@ -53,7 +55,10 @@ export class ForceAtlas2GPU<
     "nodesPosition" | "nodesMovement"
   >;
 
-  constructor(graph: Graph<NodeAttributes, EdgeAttributes>, params: Partial<ForceAtlas2Settings> = {}) {
+  constructor(
+    graph: ForceAtlas2Graph,
+    params: Partial<ForceAtlas2Settings> = {},
+  ) {
     // Initialize data:
     this.graph = graph;
     this.params = {
@@ -120,7 +125,7 @@ export class ForceAtlas2GPU<
     });
 
     // Index edges per sources and targets:
-    graph.forEachEdge((_edge, attr: { weight: number; size: number }, source, target) => {
+    graph.forEachEdge((_edge, attr, source, target) => {
       const weight = attr.weight || 1;
       const sourceIndex = this.nodeDataCache[source].index;
       const targetIndex = this.nodeDataCache[target].index;
@@ -218,10 +223,14 @@ export class ForceAtlas2GPU<
         return;
       }
 
+      const cursors: Partial<ForceAtlas2Cursors> = {};
+      UNIFORM_SETTINGS.forEach((setting) => {
+        cursors[setting] = params[setting];
+      });
       const fa2Uniforms = {
+        ...cursors,
         outboundAttCompensation: this.outboundAttCompensation,
       };
-      UNIFORM_SETTINGS.forEach((setting) => (fa2Uniforms[setting] = params[setting]));
 
       fa2Program.setUniforms(fa2Uniforms);
       fa2Program.prepare();
@@ -233,7 +242,7 @@ export class ForceAtlas2GPU<
     this.updateGraph();
     this.swapFA2Textures();
 
-    if (this.remainingSteps--) this.animationFrameID = setTimeout(() => this.step(), 0);
+    if (this.remainingSteps--) this.animationFrameID = window.setTimeout(() => this.step(), 0);
   }
 
   /**
@@ -254,7 +263,7 @@ export class ForceAtlas2GPU<
 
   public stop() {
     if (this.animationFrameID) {
-      clearTimeout(this.animationFrameID);
+      window.clearTimeout(this.animationFrameID);
       this.animationFrameID = null;
     }
     this.isRunning = false;

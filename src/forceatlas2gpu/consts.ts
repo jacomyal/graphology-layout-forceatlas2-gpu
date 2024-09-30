@@ -47,4 +47,4 @@ export const DEFAULT_FORCE_ATLAS_2_SETTINGS = {
   ...DEFAULT_FORCE_ATLAS_2_CURSORS,
 };
 
-export const UNIFORM_SETTINGS = Object.keys(DEFAULT_FORCE_ATLAS_2_CURSORS) as (keyof ForceAtlas2Settings)[];
+export const UNIFORM_SETTINGS = Object.keys(DEFAULT_FORCE_ATLAS_2_CURSORS) as (keyof ForceAtlas2Cursors)[];

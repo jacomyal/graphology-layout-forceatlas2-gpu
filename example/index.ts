@@ -3,7 +3,7 @@ import clusters from "graphology-generators/random/clusters";
 import random from "graphology-layout/random";
 import Sigma from "sigma";
 
-import { ForceAtlas2GPU } from "../src";
+import { ForceAtlas2GPU, ForceAtlas2Graph } from "../src";
 
 async function init() {
   const PARAMS = {
@@ -30,7 +30,7 @@ async function init() {
   });
 
   const container = document.getElementById("stage") as HTMLDivElement;
-  const fa2 = new ForceAtlas2GPU(graph, {
+  const fa2 = new ForceAtlas2GPU(graph as ForceAtlas2Graph, {
     gravity: 0.05,
     scalingRatio: 10,
     slowDown: 1 + Math.log(graph.order),
@@ -40,7 +40,7 @@ async function init() {
     // linLogMode: true,
     // outboundAttractionDistribution: true,
   });
-  const _renderer = new Sigma(graph, container, {
+  new Sigma(graph, container, {
     itemSizesReference: "positions",
     zoomToSizeRatioFunction: (x) => x,
   });
