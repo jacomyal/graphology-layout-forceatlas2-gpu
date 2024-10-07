@@ -6,7 +6,15 @@ import Sigma from "sigma";
 
 import { ForceAtlas2GPU, ForceAtlas2Graph } from "../src";
 
-const DEFAULT_PARAMS = {
+const NUMBER_KEYS = ["order", "size", "clusters", "iterationsPerStep", "gravity", "scalingRatio"] as const;
+const NUMBER_KEYS_SET = new Set<string>(NUMBER_KEYS);
+type NumberKey = (typeof NUMBER_KEYS)[number];
+
+const BOOLEAN_KEYS = ["strongGravityMode", "adjustSizes", "linLogMode", "outboundAttractionDistribution"] as const;
+const BOOLEAN_KEYS_SET = new Set<string>(BOOLEAN_KEYS);
+type BooleanKey = (typeof BOOLEAN_KEYS)[number];
+
+const DEFAULT_PARAMS: Record<NumberKey, number> & Record<BooleanKey, boolean> = {
   // Graph params:
   order: 1000,
   size: 5000,
@@ -16,19 +24,31 @@ const DEFAULT_PARAMS = {
   iterationsPerStep: 10,
   gravity: 0.02,
   scalingRatio: 10,
+  strongGravityMode: false,
+  adjustSizes: false,
+  linLogMode: false,
+  outboundAttractionDistribution: false,
 };
 
 async function init() {
   const query = new URLSearchParams(window.location.hash.replace(/^[#?]+/, ""));
-  const params = mapValues(DEFAULT_PARAMS, (v, k) => {
+  const params = mapValues(DEFAULT_PARAMS, (v: boolean | number, k: string) => {
     const queryValue = query.get(k);
-    if (!isNil(queryValue) && isNumber(+queryValue)) return +queryValue;
+
+    if (NUMBER_KEYS_SET.has(k)) {
+      return !isNil(queryValue) && isNumber(+queryValue) ? +queryValue : (v as number);
+    }
+
+    if (BOOLEAN_KEYS_SET.has(k)) {
+      return !isNil(queryValue) ? queryValue !== "false" : !!v;
+    }
+
     return v;
-  });
+  }) as typeof DEFAULT_PARAMS;
 
   (document.querySelector(".overlay ul") as HTMLUListElement).innerHTML = map(
     params,
-    (v: number, k) => `<li><strong>${k}:</strong> ${v.toLocaleString("en-US")}</li>`,
+    (v: number, k) => `<li><strong>${k}:</strong> ${NUMBER_KEYS_SET.has(k) ? v.toLocaleString("en-US") : v}</li>`,
   ).join("\n");
 
   window.addEventListener("hashchange", () => {
@@ -55,9 +75,6 @@ async function init() {
 
   const container = document.getElementById("stage") as HTMLDivElement;
   const fa2 = new ForceAtlas2GPU(graph as ForceAtlas2Graph, {
-    slowDown: 1 + Math.log(graph.order),
-    strongGravityMode: true,
-    // adjustSizes: true,
     // linLogMode: true,
     // outboundAttractionDistribution: true,
     ...params,
