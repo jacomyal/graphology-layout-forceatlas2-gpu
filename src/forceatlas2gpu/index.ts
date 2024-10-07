@@ -1,14 +1,11 @@
 import Graph from "graphology";
 import { EdgeDisplayData, NodeDisplayData } from "sigma/types";
 
-
-
 import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Cursors, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
 import { getForceAtlas2FragmentShader } from "./shaders/fragment-force-atlas-2";
 import { getVertexShader } from "./shaders/vertex-basic";
 import { getTextureSize, waitForGPUCompletion } from "./utils";
 import { WebCLProgram } from "./webcl-program";
-
 
 export * from "./consts";
 export * from "./utils";
@@ -55,10 +52,7 @@ export class ForceAtlas2GPU {
     "nodesPosition" | "nodesMovement"
   >;
 
-  constructor(
-    graph: ForceAtlas2Graph,
-    params: Partial<ForceAtlas2Settings> = {},
-  ) {
+  constructor(graph: ForceAtlas2Graph, params: Partial<ForceAtlas2Settings> = {}) {
     // Initialize data:
     this.graph = graph;
     this.params = {

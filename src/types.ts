@@ -1,6 +1,6 @@
 import { Attributes, EdgeMapper } from "graphology-types";
 
-import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Settings } from "./forceatlas2gpu/consts";
+import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Settings } from "./forceatlas2gpu";
 
 export type LayoutMapping = { [key: string]: { x: number; y: number } };
 

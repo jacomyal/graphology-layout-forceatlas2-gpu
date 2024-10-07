@@ -23,9 +23,9 @@ export function waitForNextRender() {
   return new Promise((resolve) => requestAnimationFrame(resolve));
 }
 
-export function waitForGPUCompletion(gl: WebGL2RenderingContext) {
+export function waitForGPUCompletion(gl: WebGL2RenderingContext): Promise<void> {
   return new Promise((resolve, reject) => {
-    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) as WebGLSync;
     gl.flush();
 
     function checkSync() {
