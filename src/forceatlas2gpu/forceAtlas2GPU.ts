@@ -1,14 +1,14 @@
 import Graph from "graphology";
 import { EdgeDisplayData, NodeDisplayData } from "sigma/types";
 
+import { WebCLProgram } from "../utils/webcl-program";
+import { getTextureSize, waitForGPUCompletion } from "../utils/webgl";
 import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Cursors, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
 import { getForceAtlas2FragmentShader } from "./shaders/fragment-force-atlas-2";
 import { getVertexShader } from "./shaders/vertex-basic";
-import { getTextureSize, waitForGPUCompletion } from "./utils";
-import { WebCLProgram } from "./webcl-program";
 
 export * from "./consts";
-export * from "./utils";
+export * from "../utils/webgl";
 
 const ATTRIBUTES_PER_ITEM = {
   nodesPosition: 4,
@@ -150,6 +150,8 @@ export class ForceAtlas2GPU {
       k = index * ATTRIBUTES_PER_ITEM.nodesPosition;
       this.nodesPositionArray[k++] = x;
       this.nodesPositionArray[k++] = y;
+      this.nodesPositionArray[k++] = mass;
+      this.outboundAttCompensation += mass;
 
       k = index * ATTRIBUTES_PER_ITEM.nodesMovement;
       this.nodesMovementArray[k++] = 0;
@@ -157,11 +159,9 @@ export class ForceAtlas2GPU {
       this.nodesMovementArray[k++] = convergence;
 
       k = index * ATTRIBUTES_PER_ITEM.nodesMetadata;
-      this.nodesMetadataArray[k++] = mass;
       this.nodesMetadataArray[k++] = size;
       this.nodesMetadataArray[k++] = edgeIndex;
       this.nodesMetadataArray[k++] = neighborsCount;
-      this.outboundAttCompensation += mass;
 
       for (let j = 0; j < neighborsCount; j++) {
         const { weight = 1, index } = neighbors[j];

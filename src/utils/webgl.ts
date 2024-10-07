@@ -19,10 +19,6 @@ export function compileShader(gl: WebGL2RenderingContext, type: number, source: 
   return shader;
 }
 
-export function waitForNextRender() {
-  return new Promise((resolve) => requestAnimationFrame(resolve));
-}
-
 export function waitForGPUCompletion(gl: WebGL2RenderingContext): Promise<void> {
   return new Promise((resolve, reject) => {
     const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) as WebGLSync;
@@ -45,3 +41,28 @@ export function waitForGPUCompletion(gl: WebGL2RenderingContext): Promise<void> 
     checkSync();
   });
 }
+
+// language=GLSL
+export const GLSL_GET_VALUE_IN_TEXTURE = /*glsl*/ `
+  vec4 getValueInTexture(sampler2D inputTexture, float index, float textureSize) {
+    float row = floor(index / textureSize);
+    float col = index - row * textureSize;
+
+    return texture(
+      inputTexture,
+      vec2(
+        (col + 0.5) / textureSize,
+        (row + 0.5) / textureSize
+      )
+    );
+  }
+`;
+
+// language=GLSL
+export const GLSL_GET_INDEX = /*glsl*/ `
+  float getIndex(vec2 positionInTexture, float textureSize) {
+    float col = floor(positionInTexture.x * textureSize);
+    float row = floor(positionInTexture.y * textureSize);
+    return row * textureSize + col;
+  }
+`;

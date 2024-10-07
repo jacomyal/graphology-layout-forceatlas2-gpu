@@ -1,5 +1,5 @@
-import { DATA_TEXTURES_FORMATS, DATA_TEXTURES_LEVELS } from "./consts";
-import { compileShader, getTextureSize } from "./utils";
+import { DATA_TEXTURES_FORMATS, DATA_TEXTURES_LEVELS } from "../forceatlas2gpu/consts";
+import { compileShader, getTextureSize } from "./webgl";
 
 export class WebCLProgram<
   DATA_TEXTURE extends string = string,

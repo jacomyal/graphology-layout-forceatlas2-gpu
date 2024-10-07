@@ -1,1 +1,1 @@
-export * from "./forceatlas2gpu";
+export * from "./forceatlas2gpu/forceAtlas2GPU";

@@ -1,7 +1,7 @@
 import Graph from "graphology";
 
+import { GLSL_GET_INDEX, GLSL_GET_VALUE_IN_TEXTURE, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
 import { ForceAtlas2Flags } from "../consts";
-import { getTextureSize, numberToGLSLFloat } from "../utils";
 
 export function getForceAtlas2FragmentShader({
   graph,
@@ -46,23 +46,9 @@ uniform float u_slowDown;
 layout(location = 0) out vec4 positionOutput;
 layout(location = 1) out vec4 movementOutput;
 
-vec4 getValueInTexture(sampler2D inputTexture, float index, float textureSize) {
-  float row = floor(index / textureSize);
-  float col = index - row * textureSize;
-  return texture(
-    inputTexture,
-    vec2(
-      (col + 0.5) / textureSize,
-      (row + 0.5) / textureSize
-    )
-  );
-}
-
-float getIndex(vec2 positionInTexture, float textureSize) {
-  float col = floor(positionInTexture.x * textureSize);
-  float row = floor(positionInTexture.y * textureSize);
-  return row * textureSize + col;
-}
+// Additional helpers:
+${GLSL_GET_VALUE_IN_TEXTURE}
+${GLSL_GET_INDEX}
 
 void main() {
   float nodeIndex = getIndex(v_textureCoord, NODES_TEXTURE_SIZE);
@@ -71,6 +57,7 @@ void main() {
   vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, nodeIndex, NODES_TEXTURE_SIZE);
   float x = nodePosition.x;
   float y = nodePosition.y;
+  float nodeMass = nodePosition.z;
 
   vec4 nodeMovement = getValueInTexture(u_nodesMovementTexture, nodeIndex, NODES_TEXTURE_SIZE);
   float oldDx = nodeMovement.x;
@@ -80,10 +67,9 @@ void main() {
   float dy = 0.0;
   
   vec4 nodeMetadata = getValueInTexture(u_nodesMetadataTexture, nodeIndex, NODES_TEXTURE_SIZE);
-  float nodeMass = nodeMetadata.r;
-  float nodeSize = nodeMetadata.g;
-  float edgesOffset = nodeMetadata.b;
-  float neighborsCount = nodeMetadata.a;
+  float nodeSize = nodeMetadata.r;
+  float edgesOffset = nodeMetadata.g;
+  float neighborsCount = nodeMetadata.b;
 
   // REPULSION:
   float repulsionCoefficient = u_scalingRatio;
@@ -91,8 +77,8 @@ void main() {
     if (j != nodeIndex) {
       vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
       vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, j, NODES_TEXTURE_SIZE);
-      float otherNodeMass = otherNodeMetadata.r;
-      float otherNodeSize = otherNodeMetadata.g;
+      float otherNodeMass = otherNodePosition.z;
+      float otherNodeSize = otherNodeMetadata.r;
 
       vec2 diff = nodePosition.xy - otherNodePosition.xy;
       float factor = 0.0;
@@ -147,12 +133,9 @@ void main() {
     vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
     vec2 diff = nodePosition.xy - otherNodePosition.xy;
 
-    positionOutput.z = edgeData.x;
-    positionOutput.w = edgeData.y;
-
     #ifdef ADJUST_SIZES
       vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
-      float otherNodeSize = otherNodeMetadata.g;
+      float otherNodeSize = otherNodeMetadata.r;
       float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
     #else
       float d = sqrt(dot(diff, diff));
@@ -232,6 +215,7 @@ void main() {
   
   positionOutput.x = x + dx;
   positionOutput.y = y + dy;
+  positionOutput.z = nodeMass;
   
   movementOutput.x = dx;
   movementOutput.y = dy;
