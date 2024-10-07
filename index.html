@@ -11,8 +11,25 @@
         overflow: hidden;
         font-family: sans-serif;
       }
+      .overlay {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        padding: 10px;
+        background: #ffffff99;
+      }
+      .overlay ul {
+        margin: 0;
+        padding: 0;
+      }
+      canvas.sigma-mouse {
+        z-index: 1;
+      }
     </style>
     <div id="stage"></div>
+    <div class="overlay">
+      <ul></ul>
+    </div>
     <script type="module" src="./example/index.ts"></script>
   </body>
 </html>
