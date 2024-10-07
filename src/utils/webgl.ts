@@ -66,3 +66,10 @@ export const GLSL_GET_INDEX = /*glsl*/ `
     return row * textureSize + col;
   }
 `;
+
+// language=GLSL
+export const GLSL_MORTON_ID_TO_DEPTH = /*glsl*/ `
+  int mortonIdToDepth(int id) {
+    return int(floor(log(float(3 * id + 4)) / log(4.0)));
+  }
+`;
