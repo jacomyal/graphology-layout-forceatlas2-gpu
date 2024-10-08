@@ -44,7 +44,7 @@ const DEFAULT_PARAMS: Record<NumberKey, number> & Record<BooleanKey, boolean> = 
   linLogMode: false,
   outboundAttractionDistribution: false,
   enableQuadTree: false,
-  quadTreeDepth: 4,
+  quadTreeDepth: 3,
   quadTreeTheta: 0.5,
 };
 

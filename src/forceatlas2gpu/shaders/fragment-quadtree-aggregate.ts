@@ -6,23 +6,17 @@ import { GLSL_getIndex, GLSL_getValueInTexture, getTextureSize, numberToGLSLFloa
  * to MAX_DEPTH - 1), and returns for each region the barycenter and the
  * aggregated mass of the region.
  */
-export function getQuadTreeAggregateFragmentShader({
-  nodesCount,
-  maxDepth = 4,
-}: {
-  nodesCount: number;
-  maxDepth?: number;
-}) {
-  if (maxDepth > 4) throw new Error("QuadTree does not support depth > 4 yet.");
+export function getQuadTreeAggregateFragmentShader({ nodesCount, depth }: { nodesCount: number; depth: number }) {
+  if (depth > 4) throw new Error("QuadTree does not support depth > 4 yet.");
 
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
   precision highp float;
 
   #define NODES_COUNT ${numberToGLSLFloat(nodesCount)}
-  #define REGIONS_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(getRegionsCount(maxDepth)))}
+  #define REGIONS_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(getRegionsCount(depth)))}
   #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(nodesCount))}
-  #define MAX_DEPTH ${Math.round(maxDepth)}
+  #define MAX_DEPTH ${Math.round(depth)}
 
   // Graph data:
   uniform sampler2D u_nodesPositionTexture;

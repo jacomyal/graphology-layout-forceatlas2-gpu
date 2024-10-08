@@ -46,10 +46,8 @@ uniform sampler2D u_nodesMovementTexture;
 uniform sampler2D u_nodesMetadataTexture;
 uniform sampler2D u_edgesTexture;
 
-#ifdef QUAD_TREE_ENABLED
-  uniform sampler2D u_nodesRegionsTexture;
-  uniform sampler2D u_regionsBarycentersTexture;
-#endif
+uniform sampler2D u_nodesRegionsTexture;
+uniform sampler2D u_regionsBarycentersTexture;
 
 in vec2 v_textureCoord;
 
@@ -135,14 +133,10 @@ void main() {
     #ifdef QUAD_TREE_ENABLED
       vec4 otherNodeRegions = getValueInTexture(u_nodesRegionsTexture, j, NODES_TEXTURE_SIZE);
       if (
-        usedRegions[int(otherNodeRegions[0])] ||
-        usedRegions[int(otherNodeRegions[1])] ||
-        usedRegions[int(otherNodeRegions[2])] ||
-        usedRegions[int(otherNodeRegions[3])]
+        ${[...Array(quadTreeDepth)].map((_, i) => `usedRegions[int(otherNodeRegions[${i}])]`).join(" || ")}
       ) {
         continue;
       }
-
     #endif
   
     vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);

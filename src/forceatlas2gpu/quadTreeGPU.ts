@@ -56,7 +56,7 @@ export class QuadTreeGPU {
       fragments: nodesCount,
       fragmentShaderSource: getQuadTreeIndexFragmentShader({
         nodesCount,
-        maxDepth: this.params.depth,
+        depth: this.params.depth,
       }),
       vertexShaderSource: getVertexShader(),
       dataTextures: [
@@ -71,7 +71,7 @@ export class QuadTreeGPU {
       fragments: getRegionsCount(this.params.depth),
       fragmentShaderSource: getQuadTreeAggregateFragmentShader({
         nodesCount,
-        maxDepth: params.depth,
+        depth: params.depth,
       }),
       vertexShaderSource: getVertexShader(),
       dataTextures: [

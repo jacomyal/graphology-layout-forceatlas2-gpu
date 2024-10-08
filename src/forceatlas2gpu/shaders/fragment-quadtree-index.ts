@@ -5,14 +5,8 @@ import { GLSL_getIndex, GLSL_getValueInTexture, getTextureSize, numberToGLSLFloa
  * depth (from 0 to MAX_DEPTH - 1) the ID of the related region, using Morton
  * IDs:
  */
-export function getQuadTreeIndexFragmentShader({
-  nodesCount,
-  maxDepth = 4,
-}: {
-  nodesCount: number;
-  maxDepth?: number;
-}) {
-  if (maxDepth > 4) throw new Error("QuadTree does not support depth > 4 yet.");
+export function getQuadTreeIndexFragmentShader({ nodesCount, depth }: { nodesCount: number; depth: number }) {
+  if (depth > 4) throw new Error("QuadTree does not support depth > 4 yet.");
 
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
@@ -20,7 +14,7 @@ export function getQuadTreeIndexFragmentShader({
 
   #define NODES_COUNT ${numberToGLSLFloat(nodesCount)}
   #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(nodesCount))}
-  #define MAX_DEPTH ${Math.round(maxDepth)}
+  #define MAX_DEPTH ${Math.round(depth)}
 
   // Graph data:
   uniform sampler2D u_nodesPositionTexture;

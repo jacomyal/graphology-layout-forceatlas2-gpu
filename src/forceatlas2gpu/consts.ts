@@ -45,7 +45,7 @@ export const DEFAULT_FORCE_ATLAS_2_CURSORS: ForceAtlas2Cursors = {
   slowDown: 1,
   maxForce: 10,
   iterationsPerStep: 10,
-  quadTreeDepth: 4,
+  quadTreeDepth: 3,
   quadTreeTheta: 0.5,
 };
 export const DEFAULT_FORCE_ATLAS_2_SETTINGS = {
