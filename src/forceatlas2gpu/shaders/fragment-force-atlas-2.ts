@@ -1,6 +1,6 @@
 import Graph from "graphology";
 
-import { GLSL_GET_INDEX, GLSL_GET_VALUE_IN_TEXTURE, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
+import { GLSL_getIndex, GLSL_getValueInTexture, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
 import { ForceAtlas2Flags } from "../consts";
 
 export function getForceAtlas2FragmentShader({
@@ -47,8 +47,8 @@ layout(location = 0) out vec4 positionOutput;
 layout(location = 1) out vec4 movementOutput;
 
 // Additional helpers:
-${GLSL_GET_VALUE_IN_TEXTURE}
-${GLSL_GET_INDEX}
+${GLSL_getValueInTexture}
+${GLSL_getIndex}
 
 void main() {
   float nodeIndex = getIndex(v_textureCoord, NODES_TEXTURE_SIZE);

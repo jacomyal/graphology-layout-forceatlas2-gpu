@@ -1,4 +1,4 @@
-import { GLSL_GET_VALUE_IN_TEXTURE, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
+import { GLSL_getValueInTexture, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
 
 /**
  * This shader is executed only once, and returns a texture with 1 pixel,
@@ -19,7 +19,7 @@ export function getQuadTreeBoundariesFragmentShader({ nodesCount }: { nodesCount
   layout(location = 0) out vec4 boundaries;
 
   // Additional helpers:
-  ${GLSL_GET_VALUE_IN_TEXTURE}
+  ${GLSL_getValueInTexture}
 
   void main() {
     vec4 firstNodePosition = getValueInTexture(u_nodesPositionTexture, 0.0, NODES_TEXTURE_SIZE);

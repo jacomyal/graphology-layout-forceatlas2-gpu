@@ -1,4 +1,4 @@
-import { GLSL_GET_INDEX, GLSL_GET_VALUE_IN_TEXTURE, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
+import { GLSL_getIndex, GLSL_getValueInTexture, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
 
 /**
  * This shader is executed for each node, and sets for each node and for each
@@ -31,8 +31,8 @@ export function getQuadTreeIndexFragmentShader({
   layout(location = 0) out vec4 nodesRegionsIDs;
 
   // Additional helpers:
-  ${GLSL_GET_VALUE_IN_TEXTURE}
-  ${GLSL_GET_INDEX}
+  ${GLSL_getValueInTexture}
+  ${GLSL_getIndex}
 
   void main() {
     float nodeIndex = getIndex(v_textureCoord, NODES_TEXTURE_SIZE);

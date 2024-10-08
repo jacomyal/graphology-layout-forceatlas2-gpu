@@ -1,11 +1,5 @@
-import { getRegionsCount } from "../../utils/quadtree";
-import {
-  GLSL_GET_INDEX,
-  GLSL_GET_VALUE_IN_TEXTURE,
-  GLSL_MORTON_ID_TO_DEPTH,
-  getTextureSize,
-  numberToGLSLFloat,
-} from "../../utils/webgl";
+import { GLSL_getMortonIdDepth, getRegionsCount } from "../../utils/quadtree";
+import { GLSL_getIndex, GLSL_getValueInTexture, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
 
 /**
  * This shader is executed for each quadtree region at each depth level (from 0
@@ -39,14 +33,14 @@ export function getQuadTreeAggregateFragmentShader({
   layout(location = 0) out vec4 regionsBarycenters;
 
   // Additional helpers:
-  ${GLSL_GET_VALUE_IN_TEXTURE}
-  ${GLSL_GET_INDEX}
-  ${GLSL_MORTON_ID_TO_DEPTH}
+  ${GLSL_getValueInTexture}
+  ${GLSL_getIndex}
+  ${GLSL_getMortonIdDepth}
   
   void main() {
     float regionIndex = getIndex(v_textureCoord, REGIONS_TEXTURE_SIZE);
     float regionID = regionIndex + 1.0;
-    int regionDepth = mortonIdToDepth(regionID);
+    int regionDepth = getMortonIdDepth(int(regionID));
     
     if (regionDepth > MAX_DEPTH) return;
     

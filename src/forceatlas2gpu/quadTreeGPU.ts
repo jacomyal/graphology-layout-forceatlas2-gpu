@@ -1,8 +1,10 @@
 import { getRegionsCount } from "../utils/quadtree";
 import { WebCLProgram } from "../utils/webcl-program";
+import { getQuadTreeAggregateFragmentShader } from "./shaders/fragment-quadtree-aggregate";
 import { getQuadTreeBoundariesFragmentShader } from "./shaders/fragment-quadtree-boundaries";
 import { getQuadTreeIndexFragmentShader } from "./shaders/fragment-quadtree-index";
 import { getVertexShader } from "./shaders/vertex-basic";
+
 
 export * from "./consts";
 export * from "../utils/webgl";
@@ -67,7 +69,7 @@ export class QuadTreeGPU {
     this.aggregateProgram = new WebCLProgram({
       gl,
       fragments: getRegionsCount(this.params.depth),
-      fragmentShaderSource: getQuadTreeIndexFragmentShader({
+      fragmentShaderSource: getQuadTreeAggregateFragmentShader({
         nodesCount,
         maxDepth: params.depth,
       }),
@@ -95,7 +97,7 @@ export class QuadTreeGPU {
       this.indexProgram.outputTexturesIndex.nodesRegionsIDs.texture;
   }
 
-  private async step() {
+  private step() {
     const { boundariesProgram, indexProgram, aggregateProgram } = this;
 
     // Search boundaries
@@ -118,15 +120,15 @@ export class QuadTreeGPU {
    * Public API:
    * ***********
    */
-  public async compute(nodesTexture: WebGLTexture) {
+  public compute(nodesTexture: WebGLTexture) {
     this.rebindTextures(nodesTexture);
-    return this.step();
+    this.step();
   }
 
   public getNodesRegionsTexture(): WebGLTexture {
     return this.aggregateProgram.dataTexturesIndex.nodesRegionsIDs.texture;
   }
   public getRegionsBarycentersTexture(): WebGLTexture {
-    return this.aggregateProgram.outputTexturesIndex.regionsBarycenters;
+    return this.aggregateProgram.outputTexturesIndex.regionsBarycenters.texture;
   }
 }

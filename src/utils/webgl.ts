@@ -43,7 +43,7 @@ export function waitForGPUCompletion(gl: WebGL2RenderingContext): Promise<void> 
 }
 
 // language=GLSL
-export const GLSL_GET_VALUE_IN_TEXTURE = /*glsl*/ `
+export const GLSL_getValueInTexture = /*glsl*/ `
   vec4 getValueInTexture(sampler2D inputTexture, float index, float textureSize) {
     float row = floor(index / textureSize);
     float col = index - row * textureSize;
@@ -59,17 +59,10 @@ export const GLSL_GET_VALUE_IN_TEXTURE = /*glsl*/ `
 `;
 
 // language=GLSL
-export const GLSL_GET_INDEX = /*glsl*/ `
+export const GLSL_getIndex = /*glsl*/ `
   float getIndex(vec2 positionInTexture, float textureSize) {
     float col = floor(positionInTexture.x * textureSize);
     float row = floor(positionInTexture.y * textureSize);
     return row * textureSize + col;
-  }
-`;
-
-// language=GLSL
-export const GLSL_MORTON_ID_TO_DEPTH = /*glsl*/ `
-  int mortonIdToDepth(int id) {
-    return int(floor(log(float(3 * id + 4)) / log(4.0)));
   }
 `;
