@@ -6,7 +6,7 @@ _**Warning**: This experiment is not production ready, and is actually only visi
 
 ## Current state
 
-Right now, I think I have a quite idiomatic WebGL implementation of ForceAtlas2, without any complexity reduction strategy (i.e. no [Barnes Hut](https://en.wikipedia.org/wiki/Barnes%E2%80%93Hut_simulation)).
+Right now, I think I have a quite idiomatic WebGL implementation of ForceAtlas2. I hope to make it much faster soon, though...
 
 It is quite a good base though, since there are various WebGL specific strategies to make the algorithm run as fast as possible, with as less CPU as possible:
 

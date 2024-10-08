@@ -44,9 +44,14 @@ export function getQuadTreeAggregateFragmentShader({
     
     if (regionDepth > MAX_DEPTH) return;
     
+    bool isRegionEmpty = true;
     float aggregatedX = 0.0;
     float aggregatedY = 0.0;
     float aggregatedMass = 0.0;
+    float minX;
+    float maxX;
+    float minY;
+    float maxY;
     
     for (float j = 0.0; j < NODES_COUNT; j++) {
       vec4 nodeRegionIDs = getValueInTexture(u_nodesRegionsIDsTexture, j, NODES_TEXTURE_SIZE);
@@ -62,8 +67,24 @@ export function getQuadTreeAggregateFragmentShader({
         aggregatedX += x * mass;
         aggregatedY += y * mass;
         aggregatedMass += mass;
+        
+        if (isRegionEmpty) {
+          minX = x;
+          maxX = x;
+          minY = y;
+          maxY = y;
+        } else {
+          minX = min(minX, x);
+          maxX = max(maxX, x);
+          minY = min(minY, y);
+          maxY = max(maxY, y);
+        }
+        
+        isRegionEmpty = false;
       }
     }
+    
+    float regionSize = isRegionEmpty ? 0.0 : max(maxX - minX, maxY - minY);
 
     aggregatedX /= aggregatedMass;
     aggregatedY /= aggregatedMass;
@@ -71,6 +92,7 @@ export function getQuadTreeAggregateFragmentShader({
     regionsBarycenters.x = aggregatedX;
     regionsBarycenters.y = aggregatedY;
     regionsBarycenters.z = aggregatedMass;
+    regionsBarycenters.w = regionSize * regionSize;
   }`;
 
   return SHADER;

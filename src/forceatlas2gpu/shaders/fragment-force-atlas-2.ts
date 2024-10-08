@@ -1,16 +1,27 @@
 import Graph from "graphology";
 
+import {
+  GLSL_getMortonIdDepth,
+  GLSL_getParentMortonId,
+  GLSL_getRegionsCount,
+  getRegionsCount,
+} from "../../utils/quadtree";
 import { GLSL_getIndex, GLSL_getValueInTexture, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
 import { ForceAtlas2Flags } from "../consts";
 
 export function getForceAtlas2FragmentShader({
   graph,
+  quadTreeDepth,
+  quadTreeTheta,
   linLogMode,
   adjustSizes,
   strongGravityMode,
   outboundAttractionDistribution,
+  enableQuadTree,
 }: {
   graph: Graph;
+  quadTreeDepth: number;
+  quadTreeTheta: number;
 } & ForceAtlas2Flags) {
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
@@ -19,16 +30,27 @@ precision highp float;
 #define NODES_COUNT ${numberToGLSLFloat(graph.order)}
 #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.order))}
 #define EDGES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.size * 2))}
+#define QUAD_TREE_DEPTH ${Math.floor(quadTreeDepth)}
+#define QUAD_TREE_REGIONS_COUNT ${Math.floor(getRegionsCount(quadTreeDepth))}
+#define QUAD_TREE_REGIONS_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(getRegionsCount(quadTreeDepth)))}
+#define QUAD_TREE_THETA_SQUARED ${numberToGLSLFloat(quadTreeTheta * quadTreeTheta)}
 ${linLogMode ? "#define LINLOG_MODE" : ""}
 ${adjustSizes ? "#define ADJUST_SIZES" : ""}
 ${strongGravityMode ? "#define STRONG_GRAVITY_MODE" : ""}
 ${outboundAttractionDistribution ? "#define OUTBOUND_ATTRACTION_DISTRIBUTION" : ""}
+${enableQuadTree ? "#define QUAD_TREE_ENABLED" : ""}
 
 // Graph data:
 uniform sampler2D u_nodesPositionTexture;
 uniform sampler2D u_nodesMovementTexture;
 uniform sampler2D u_nodesMetadataTexture;
 uniform sampler2D u_edgesTexture;
+
+#ifdef QUAD_TREE_ENABLED
+  uniform sampler2D u_nodesRegionsTexture;
+  uniform sampler2D u_regionsBarycentersTexture;
+#endif
+
 in vec2 v_textureCoord;
 
 // Settings management:
@@ -50,6 +72,10 @@ layout(location = 1) out vec4 movementOutput;
 ${GLSL_getValueInTexture}
 ${GLSL_getIndex}
 
+${GLSL_getRegionsCount}
+${GLSL_getMortonIdDepth}
+${GLSL_getParentMortonId}
+
 void main() {
   float nodeIndex = getIndex(v_textureCoord, NODES_TEXTURE_SIZE);
   if (nodeIndex >= NODES_COUNT) return;
@@ -65,7 +91,7 @@ void main() {
   float nodeConvergence = nodeMovement.z;
   float dx = 0.0;
   float dy = 0.0;
-  
+
   vec4 nodeMetadata = getValueInTexture(u_nodesMetadataTexture, nodeIndex, NODES_TEXTURE_SIZE);
   float nodeSize = nodeMetadata.r;
   float edgesOffset = nodeMetadata.g;
@@ -73,36 +99,79 @@ void main() {
 
   // REPULSION:
   float repulsionCoefficient = u_scalingRatio;
-  for (float j = 0.0; j < NODES_COUNT; j++) {
-    if (j != nodeIndex) {
-      vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
-      vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, j, NODES_TEXTURE_SIZE);
-      float otherNodeMass = otherNodePosition.z;
-      float otherNodeSize = otherNodeMetadata.r;
 
-      vec2 diff = nodePosition.xy - otherNodePosition.xy;
-      float factor = 0.0;
-
-      #ifdef ADJUST_SIZES
-        // Anticollision Linear Repulsion
-        float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
-        if (d > 0.0) {
-          factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
-        } else if (d < 0.0) {
-          factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
-        }
-
-      #else
-        // Linear Repulsion
-        float dSquare = dot(diff, diff);
-        if (dSquare > 0.0) {
-          factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
-        }
-      #endif
-
-      dx += diff.x * factor;
-      dy += diff.y * factor;
+  #ifdef QUAD_TREE_ENABLED
+    // Region-to-node repulsion (using quad tree):
+    bool[QUAD_TREE_REGIONS_COUNT] usedRegions;
+    for (int regionId = 0; regionId < QUAD_TREE_REGIONS_COUNT; regionId++) {
+      int depth = getMortonIdDepth(regionId);
+      int parentId = getParentMortonId(regionId);
+    
+      // Skip regions whose parents have been used for repulsion:
+      if (depth > 1 && usedRegions[parentId]) continue;
+    
+      vec4 regionBarycenter = getValueInTexture(u_regionsBarycentersTexture, float(regionId), QUAD_TREE_REGIONS_TEXTURE_SIZE);
+      vec2 regionCoordinates = regionBarycenter.xy;
+      float regionMass = regionBarycenter.z;
+      float regionSizeSquare = regionBarycenter.w;
+    
+      vec2 diff = nodePosition.xy - regionCoordinates;
+      float dSquare = dot(diff, diff);
+    
+      // Barnes-Hut Theta test:
+      if (4.0 * regionSizeSquare / dSquare < QUAD_TREE_THETA_SQUARED) {
+        usedRegions[regionId] = true;
+        float factor = repulsionCoefficient * nodeMass * regionMass / dSquare;
+        dx += diff.x * factor;
+        dy += diff.y * factor;
+      }
     }
+  #endif
+
+  // Node-to-node repulsion (no quad tree):
+  for (float j = 0.0; j < NODES_COUNT; j++) {
+    if (j == nodeIndex) continue;
+
+    #ifdef QUAD_TREE_ENABLED
+      vec4 otherNodeRegions = getValueInTexture(u_nodesRegionsTexture, j, NODES_TEXTURE_SIZE);
+      if (
+        usedRegions[int(otherNodeRegions[0])] ||
+        usedRegions[int(otherNodeRegions[1])] ||
+        usedRegions[int(otherNodeRegions[2])] ||
+        usedRegions[int(otherNodeRegions[3])]
+      ) {
+        continue;
+      }
+
+    #endif
+  
+    vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
+    vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, j, NODES_TEXTURE_SIZE);
+    float otherNodeMass = otherNodePosition.z;
+    float otherNodeSize = otherNodeMetadata.r;
+
+    vec2 diff = nodePosition.xy - otherNodePosition.xy;
+    float factor = 0.0;
+
+    #ifdef ADJUST_SIZES
+      // Anticollision Linear Repulsion
+      float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
+      if (d > 0.0) {
+        factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
+      } else if (d < 0.0) {
+        factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
+      }
+
+    #else
+      // Linear Repulsion
+      float dSquare = dot(diff, diff);
+      if (dSquare > 0.0) {
+        factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
+      }
+    #endif
+
+    dx += diff.x * factor;
+    dy += diff.y * factor;
   }
 
   // GRAVITY:
@@ -209,14 +278,14 @@ void main() {
       sqrt(nodeSpeed * forceSquared * swingingFactor)
     );
   #endif
-  
+
   dx = dx * nodeSpeed / u_slowDown;
   dy = dy * nodeSpeed / u_slowDown;
-  
+
   positionOutput.x = x + dx;
   positionOutput.y = y + dy;
   positionOutput.z = nodeMass;
-  
+
   movementOutput.x = dx;
   movementOutput.y = dy;
 }`;

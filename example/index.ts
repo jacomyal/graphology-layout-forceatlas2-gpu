@@ -6,11 +6,26 @@ import Sigma from "sigma";
 
 import { ForceAtlas2GPU, ForceAtlas2Graph } from "../src";
 
-const NUMBER_KEYS = ["order", "size", "clusters", "iterationsPerStep", "gravity", "scalingRatio"] as const;
+const NUMBER_KEYS = [
+  "order",
+  "size",
+  "clusters",
+  "iterationsPerStep",
+  "gravity",
+  "scalingRatio",
+  "quadTreeDepth",
+  "quadTreeTheta",
+] as const;
 const NUMBER_KEYS_SET = new Set<string>(NUMBER_KEYS);
 type NumberKey = (typeof NUMBER_KEYS)[number];
 
-const BOOLEAN_KEYS = ["strongGravityMode", "adjustSizes", "linLogMode", "outboundAttractionDistribution"] as const;
+const BOOLEAN_KEYS = [
+  "strongGravityMode",
+  "adjustSizes",
+  "linLogMode",
+  "outboundAttractionDistribution",
+  "enableQuadTree",
+] as const;
 const BOOLEAN_KEYS_SET = new Set<string>(BOOLEAN_KEYS);
 type BooleanKey = (typeof BOOLEAN_KEYS)[number];
 
@@ -28,6 +43,9 @@ const DEFAULT_PARAMS: Record<NumberKey, number> & Record<BooleanKey, boolean> = 
   adjustSizes: false,
   linLogMode: false,
   outboundAttractionDistribution: false,
+  enableQuadTree: false,
+  quadTreeDepth: 4,
+  quadTreeTheta: 0.5,
 };
 
 async function init() {

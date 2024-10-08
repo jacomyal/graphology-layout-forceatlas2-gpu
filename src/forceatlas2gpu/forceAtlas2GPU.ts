@@ -4,6 +4,7 @@ import { EdgeDisplayData, NodeDisplayData } from "sigma/types";
 import { WebCLProgram } from "../utils/webcl-program";
 import { getTextureSize, waitForGPUCompletion } from "../utils/webgl";
 import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Cursors, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
+import { QuadTreeGPU } from "./quadTreeGPU";
 import { getForceAtlas2FragmentShader } from "./shaders/fragment-force-atlas-2";
 import { getVertexShader } from "./shaders/vertex-basic";
 
@@ -15,6 +16,8 @@ const ATTRIBUTES_PER_ITEM = {
   nodesMovement: 4,
   nodesMetadata: 4,
   edges: 2,
+  nodesRegions: 4,
+  regionsBarycenters: 4,
 } as const;
 
 export type ForceAtlas2Graph = Graph<NodeDisplayData, EdgeDisplayData & { weight?: number }>;
@@ -48,9 +51,10 @@ export class ForceAtlas2GPU {
 
   // Programs:
   private fa2Program: WebCLProgram<
-    "nodesPosition" | "nodesMovement" | "nodesMetadata" | "edges",
+    "nodesPosition" | "nodesMovement" | "nodesMetadata" | "edges" | "nodesRegions" | "regionsBarycenters",
     "nodesPosition" | "nodesMovement"
   >;
+  private quadTree: QuadTreeGPU;
 
   constructor(graph: ForceAtlas2Graph, params: Partial<ForceAtlas2Settings> = {}) {
     // Initialize data:
@@ -60,6 +64,11 @@ export class ForceAtlas2GPU {
       ...params,
     };
     this.nodeDataCache = {};
+
+    if (this.params.enableQuadTree) {
+      if (this.params.quadTreeDepth < 1 || this.params.quadTreeDepth > 4)
+        throw new Error("quadTreeDepth must be 1, 2, 3 or 4");
+    }
 
     this.readGraph();
 
@@ -83,10 +92,13 @@ export class ForceAtlas2GPU {
       fragments: this.graph.order,
       fragmentShaderSource: getForceAtlas2FragmentShader({
         graph,
+        quadTreeDepth: this.params.quadTreeDepth,
+        quadTreeTheta: this.params.quadTreeTheta,
         linLogMode: this.params.linLogMode,
         adjustSizes: this.params.adjustSizes,
         strongGravityMode: this.params.strongGravityMode,
         outboundAttractionDistribution: this.params.outboundAttractionDistribution,
+        enableQuadTree: this.params.enableQuadTree,
       }),
       vertexShaderSource: getVertexShader(),
       dataTextures: [
@@ -94,12 +106,19 @@ export class ForceAtlas2GPU {
         { name: "nodesMovement", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMovement },
         { name: "nodesMetadata", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMetadata },
         { name: "edges", attributesPerItem: ATTRIBUTES_PER_ITEM.edges },
+        { name: "nodesRegions", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesRegions },
+        { name: "regionsBarycenters", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsBarycenters },
       ],
       outputTextures: [
         { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition },
         { name: "nodesMovement", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMovement },
       ],
     });
+
+    this.quadTree = new QuadTreeGPU(this.gl, { nodesCount: graph.order }, { depth: 4 });
+
+    this.fa2Program.dataTexturesIndex.nodesRegions.texture = this.quadTree.getNodesRegionsTexture();
+    this.fa2Program.dataTexturesIndex.regionsBarycenters.texture = this.quadTree.getRegionsBarycentersTexture();
   }
 
   private readGraph() {
@@ -206,7 +225,7 @@ export class ForceAtlas2GPU {
   }
 
   private async step() {
-    const { fa2Program, params } = this;
+    const { quadTree, fa2Program, params } = this;
     const { iterationsPerStep } = params;
 
     let remainingIterations = iterationsPerStep;
@@ -225,6 +244,12 @@ export class ForceAtlas2GPU {
         ...cursors,
         outboundAttCompensation: this.outboundAttCompensation,
       };
+
+      // Compute quad-tree if needed:
+      if (params.enableQuadTree) {
+        quadTree.compute(fa2Program.dataTexturesIndex.nodesPosition.texture);
+        fa2Program.activate();
+      }
 
       fa2Program.setUniforms(fa2Uniforms);
       fa2Program.prepare();

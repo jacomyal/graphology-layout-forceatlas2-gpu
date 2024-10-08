@@ -23,18 +23,29 @@ export function getQuadTreeBoundariesFragmentShader({ nodesCount }: { nodesCount
 
   void main() {
     vec4 firstNodePosition = getValueInTexture(u_nodesPositionTexture, 0.0, NODES_TEXTURE_SIZE);
-    
-    float xMin = firstNodePosition.x;
-    float xMax = firstNodePosition.x;
-    float yMin = firstNodePosition.y;
-    float yMax = firstNodePosition.y;
+
+    bool hasSetValues = false;
+    float xMin;
+    float xMax;
+    float yMin;
+    float yMax;
 
     for (float j = 1.0; j < NODES_COUNT; j++) {
       vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
-      xMin = min(nodePosition.x, xMin);
-      xMax = max(nodePosition.x, xMax);
-      yMin = min(nodePosition.y, yMin);
-      yMax = max(nodePosition.y, yMax);
+      
+      if (!hasSetValues) {
+        xMin = nodePosition.x;
+        xMax = nodePosition.x;
+        yMin = nodePosition.y;
+        yMax = nodePosition.y;
+      } else {
+        xMin = min(nodePosition.x, xMin);
+        xMax = max(nodePosition.x, xMax);
+        yMin = min(nodePosition.y, yMin);
+        yMax = max(nodePosition.y, yMax);
+      }
+
+      hasSetValues = true;
     }
     
     boundaries = vec4(

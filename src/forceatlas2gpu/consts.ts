@@ -17,6 +17,7 @@ export type ForceAtlas2Flags = {
   adjustSizes: boolean;
   strongGravityMode: boolean;
   outboundAttractionDistribution: boolean;
+  enableQuadTree: boolean;
 };
 export type ForceAtlas2Cursors = {
   edgeWeightInfluence: number;
@@ -25,6 +26,8 @@ export type ForceAtlas2Cursors = {
   slowDown: number;
   maxForce: number;
   iterationsPerStep: number;
+  quadTreeDepth: number;
+  quadTreeTheta: number;
 };
 export type ForceAtlas2Settings = ForceAtlas2Flags & ForceAtlas2Cursors;
 
@@ -33,6 +36,7 @@ export const DEFAULT_FORCE_ATLAS_2_FLAGS: ForceAtlas2Flags = {
   adjustSizes: false,
   strongGravityMode: false,
   outboundAttractionDistribution: false,
+  enableQuadTree: false,
 };
 export const DEFAULT_FORCE_ATLAS_2_CURSORS: ForceAtlas2Cursors = {
   edgeWeightInfluence: 1,
@@ -41,6 +45,8 @@ export const DEFAULT_FORCE_ATLAS_2_CURSORS: ForceAtlas2Cursors = {
   slowDown: 1,
   maxForce: 10,
   iterationsPerStep: 10,
+  quadTreeDepth: 4,
+  quadTreeTheta: 0.5,
 };
 export const DEFAULT_FORCE_ATLAS_2_SETTINGS = {
   ...DEFAULT_FORCE_ATLAS_2_FLAGS,

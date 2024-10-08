@@ -46,7 +46,7 @@ export const GLSL_getRegionsCount = /*glsl*/ `
   int getRegionsCount(int depth) {
     int count = 0;
     for (int i = 0; i < depth; i++) {
-      count = count + int(pow(4.0, i + 1));
+      count = count + int(pow(4.0, float(i) + 1.0));
     }
 
     return count;
@@ -80,7 +80,7 @@ export const GLSL_getParentMortonId = /*glsl*/ `
 
     int parentDepth = depth - 1;
     int idAtDepth = id - getRegionsCount(parentDepth);
-    int parentIdAtDepth = floor(idAtDepth / 4);
+    int parentIdAtDepth = int(floor(float(idAtDepth) / 4.0));
     return parentIdAtDepth + getRegionsCount(parentDepth - 1);
   }
 `;
