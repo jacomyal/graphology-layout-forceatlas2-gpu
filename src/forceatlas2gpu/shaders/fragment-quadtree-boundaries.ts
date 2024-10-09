@@ -7,54 +7,54 @@ import { GLSL_getValueInTexture, getTextureSize, numberToGLSLFloat } from "../..
 export function getQuadTreeBoundariesFragmentShader({ nodesCount }: { nodesCount: number }) {
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
-  precision highp float;
+precision highp float;
 
-  #define NODES_COUNT ${numberToGLSLFloat(nodesCount)}
-  #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(nodesCount))}
+#define NODES_COUNT ${numberToGLSLFloat(nodesCount)}
+#define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(nodesCount))}
 
-  // Graph data:
-  uniform sampler2D u_nodesPositionTexture;
+// Graph data:
+uniform sampler2D u_nodesPositionTexture;
 
-  // Output
-  layout(location = 0) out vec4 boundaries;
+// Output
+layout(location = 0) out vec4 boundaries;
 
-  // Additional helpers:
-  ${GLSL_getValueInTexture}
+// Additional helpers:
+${GLSL_getValueInTexture}
 
-  void main() {
-    vec4 firstNodePosition = getValueInTexture(u_nodesPositionTexture, 0.0, NODES_TEXTURE_SIZE);
+void main() {
+  vec4 firstNodePosition = getValueInTexture(u_nodesPositionTexture, 0.0, NODES_TEXTURE_SIZE);
 
-    bool hasSetValues = false;
-    float xMin;
-    float xMax;
-    float yMin;
-    float yMax;
+  bool hasSetValues = false;
+  float xMin;
+  float xMax;
+  float yMin;
+  float yMax;
 
-    for (float j = 1.0; j < NODES_COUNT; j++) {
-      vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
-      
-      if (!hasSetValues) {
-        xMin = nodePosition.x;
-        xMax = nodePosition.x;
-        yMin = nodePosition.y;
-        yMax = nodePosition.y;
-      } else {
-        xMin = min(nodePosition.x, xMin);
-        xMax = max(nodePosition.x, xMax);
-        yMin = min(nodePosition.y, yMin);
-        yMax = max(nodePosition.y, yMax);
-      }
+  for (float j = 1.0; j < NODES_COUNT; j++) {
+    vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
 
-      hasSetValues = true;
+    if (!hasSetValues) {
+      xMin = nodePosition.x;
+      xMax = nodePosition.x;
+      yMin = nodePosition.y;
+      yMax = nodePosition.y;
+    } else {
+      xMin = min(nodePosition.x, xMin);
+      xMax = max(nodePosition.x, xMax);
+      yMin = min(nodePosition.y, yMin);
+      yMax = max(nodePosition.y, yMax);
     }
-    
-    boundaries = vec4(
-      xMin,
-      xMax,
-      yMin,
-      yMax
-    );
-  }`;
+
+    hasSetValues = true;
+  }
+
+  boundaries = vec4(
+    xMin,
+    xMax,
+    yMin,
+    yMax
+  );
+}`;
 
   return SHADER;
 }
