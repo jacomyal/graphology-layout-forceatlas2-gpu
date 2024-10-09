@@ -74,6 +74,21 @@ ${GLSL_getRegionsCount}
 ${GLSL_getMortonIdDepth}
 ${GLSL_getParentMortonId}
 
+// To set a region as used:
+int usedRegions[${Math.floor(getRegionsCount(quadTreeDepth) / 32)}]; // 9 * 32 = 288 bits, which covers 264 regions.
+void setRegionUsed(int regionId) {
+  int index = regionId / 32; // Find the relevant int in the array.
+  int bit = regionId % 32;   // Find the bit within that int.
+  usedRegions[index] |= (1 << bit);
+}
+
+// To check if a region is used:
+bool isRegionUsed(int regionId) {
+  int index = regionId / 32;
+  int bit = regionId % 32;
+  return (usedRegions[index] & (1 << bit)) != 0;
+}
+
 void main() {
   float nodeIndex = getIndex(v_textureCoord, NODES_TEXTURE_SIZE);
   if (nodeIndex >= NODES_COUNT) return;
@@ -100,13 +115,15 @@ void main() {
 
   #ifdef QUAD_TREE_ENABLED
     // Region-to-node repulsion (using quad tree):
-    bool[QUAD_TREE_REGIONS_COUNT] usedRegions;
     for (int regionId = 0; regionId < QUAD_TREE_REGIONS_COUNT; regionId++) {
       int depth = getMortonIdDepth(regionId);
       int parentId = getParentMortonId(regionId);
     
       // Skip regions whose parents have been used for repulsion:
-      if (depth > 1 && usedRegions[parentId]) continue;
+      if (depth > 1 && isRegionUsed(parentId)) {
+        setRegionUsed(regionId);
+        continue;
+      }
     
       vec4 regionBarycenter = getValueInTexture(u_regionsBarycentersTexture, float(regionId), QUAD_TREE_REGIONS_TEXTURE_SIZE);
       vec2 regionCoordinates = regionBarycenter.xy;
@@ -118,7 +135,7 @@ void main() {
     
       // Barnes-Hut Theta test:
       if (4.0 * regionSizeSquare / dSquare < QUAD_TREE_THETA_SQUARED) {
-        usedRegions[regionId] = true;
+        setRegionUsed(regionId);
         float factor = repulsionCoefficient * nodeMass * regionMass / dSquare;
         dx += diff.x * factor;
         dy += diff.y * factor;
@@ -132,9 +149,7 @@ void main() {
 
     #ifdef QUAD_TREE_ENABLED
       vec4 otherNodeRegions = getValueInTexture(u_nodesRegionsTexture, j, NODES_TEXTURE_SIZE);
-      if (
-        ${[...Array(quadTreeDepth)].map((_, i) => `usedRegions[int(otherNodeRegions[${i}])]`).join(" || ")}
-      ) {
+      if (isRegionUsed(int(otherNodeRegions[QUAD_TREE_DEPTH]))) {
         continue;
       }
     #endif
