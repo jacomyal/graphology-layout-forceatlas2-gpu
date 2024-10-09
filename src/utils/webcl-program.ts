@@ -197,6 +197,13 @@ export class WebCLProgram<
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
+  public swapTextures(input: DATA_TEXTURE, output: OUTPUT_TEXTURE) {
+    [this.dataTexturesIndex[input].texture, this.outputTexturesIndex[output].texture] = [
+      this.outputTexturesIndex[output].texture,
+      this.dataTexturesIndex[input].texture,
+    ];
+  }
+
   public getOutputs() {
     const res: Partial<Record<OUTPUT_TEXTURE, Float32Array>> = {};
     this.outputTextures.forEach(({ name }) => {
