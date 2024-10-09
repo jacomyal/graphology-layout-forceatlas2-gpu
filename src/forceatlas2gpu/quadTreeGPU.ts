@@ -5,7 +5,6 @@ import { getQuadTreeBoundariesFragmentShader } from "./shaders/fragment-quadtree
 import { getQuadTreeIndexFragmentShader } from "./shaders/fragment-quadtree-index";
 import { getVertexShader } from "./shaders/vertex-basic";
 
-
 export * from "./consts";
 export * from "../utils/webgl";
 
@@ -71,7 +70,7 @@ export class QuadTreeGPU {
       fragments: getRegionsCount(this.params.depth),
       fragmentShaderSource: getQuadTreeAggregateFragmentShader({
         nodesCount,
-        depth: params.depth,
+        depth: this.params.depth,
       }),
       vertexShaderSource: getVertexShader(),
       dataTextures: [
