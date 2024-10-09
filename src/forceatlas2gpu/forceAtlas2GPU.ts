@@ -28,7 +28,7 @@ export class ForceAtlas2GPU {
 
   // Internal state:
   private remainingSteps = 0;
-  private isRunning = false;
+  private running = false;
   private animationFrameID: null | number = null;
   private params: ForceAtlas2Settings;
 
@@ -231,7 +231,7 @@ export class ForceAtlas2GPU {
     let remainingIterations = iterationsPerStep;
 
     while (remainingIterations-- > 0) {
-      if (!this.isRunning) {
+      if (!this.running) {
         this.stop();
         return;
       }
@@ -270,7 +270,7 @@ export class ForceAtlas2GPU {
    */
   public start(steps = 1) {
     this.remainingSteps = steps;
-    this.isRunning = true;
+    this.running = true;
     this.fa2Program.setTextureData("nodesPosition", this.nodesPositionArray, this.graph.order);
     this.fa2Program.setTextureData("nodesMovement", this.nodesMovementArray, this.graph.order);
     this.fa2Program.setTextureData("nodesMetadata", this.nodesMetadataArray, this.graph.order);
@@ -285,11 +285,15 @@ export class ForceAtlas2GPU {
       window.clearTimeout(this.animationFrameID);
       this.animationFrameID = null;
     }
-    this.isRunning = false;
+    this.running = false;
   }
 
   public run() {
     this.start();
     this.stop();
+  }
+
+  public isRunning() {
+    return this.running;
   }
 }

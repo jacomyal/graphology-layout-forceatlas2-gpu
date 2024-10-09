@@ -5,6 +5,7 @@ import { isNil, isNumber, map, mapValues } from "lodash";
 import Sigma from "sigma";
 
 import { ForceAtlas2GPU, ForceAtlas2Graph } from "../src";
+import { countSigmaRPS } from "./sigmaRPSCounter";
 
 const NUMBER_KEYS = [
   "order",
@@ -93,16 +94,32 @@ async function init() {
 
   const container = document.getElementById("stage") as HTMLDivElement;
   const fa2 = new ForceAtlas2GPU(graph as ForceAtlas2Graph, {
-    // linLogMode: true,
-    // outboundAttractionDistribution: true,
     ...params,
   });
-  new Sigma(graph, container, {
+  const sigma = new Sigma(graph, container, {
     itemSizesReference: "positions",
     zoomToSizeRatioFunction: (x) => x,
   });
 
   fa2.start(1000);
+
+  // Add RPS counter:
+  const counter = countSigmaRPS(sigma);
+  if (counter.dom) document.body.append(counter.dom);
+
+  // Add toggle button:
+  const toggleButton = document.querySelector("button") as HTMLButtonElement;
+  toggleButton.addEventListener("click", () => {
+    if (fa2.isRunning()) {
+      console.log("Stop FA2");
+      fa2.stop();
+      counter.pause();
+    } else {
+      console.log("Start FA2");
+      fa2.start(1000);
+      counter.reset();
+    }
+  });
 
   return "FA2 was initialized properly";
 }
