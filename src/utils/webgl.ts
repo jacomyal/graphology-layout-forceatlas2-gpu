@@ -44,25 +44,25 @@ export function waitForGPUCompletion(gl: WebGL2RenderingContext): Promise<void> 
 
 // language=GLSL
 export const GLSL_getValueInTexture = /*glsl*/ `
-  vec4 getValueInTexture(sampler2D inputTexture, float index, float textureSize) {
-    float row = floor(index / textureSize);
-    float col = index - row * textureSize;
+vec4 getValueInTexture(sampler2D inputTexture, float index, float textureSize) {
+  float row = floor(index / textureSize);
+  float col = index - row * textureSize;
 
-    return texture(
-      inputTexture,
-      vec2(
-        (col + 0.5) / textureSize,
-        (row + 0.5) / textureSize
-      )
-    );
-  }
+  return texture(
+    inputTexture,
+    vec2(
+      (col + 0.5) / textureSize,
+      (row + 0.5) / textureSize
+    )
+  );
+}
 `;
 
 // language=GLSL
 export const GLSL_getIndex = /*glsl*/ `
-  float getIndex(vec2 positionInTexture, float textureSize) {
-    float col = floor(positionInTexture.x * textureSize);
-    float row = floor(positionInTexture.y * textureSize);
-    return row * textureSize + col;
-  }
+float getIndex(vec2 positionInTexture, float textureSize) {
+  float col = floor(positionInTexture.x * textureSize);
+  float row = floor(positionInTexture.y * textureSize);
+  return row * textureSize + col;
+}
 `;
