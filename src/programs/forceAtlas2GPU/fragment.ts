@@ -7,7 +7,7 @@ import {
   getRegionsCount,
 } from "../../utils/quadtree";
 import { GLSL_getIndex, GLSL_getValueInTexture, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
-import { ForceAtlas2Flags } from "../consts";
+import { ForceAtlas2Flags } from "./consts";
 
 export function getForceAtlas2FragmentShader({
   graph,

@@ -1,4 +1,4 @@
-import { compileShader, getTextureSize } from "./webgl";
+import { compileShader, getTextureSize } from "../../utils/webgl";
 
 export const DATA_TEXTURES_LEVELS: Record<number, number> = {
   1: WebGL2RenderingContext.R32F,
@@ -14,7 +14,7 @@ export const DATA_TEXTURES_FORMATS: Record<number, number> = {
   4: WebGL2RenderingContext.RGBA,
 };
 
-export class WebCLProgram<
+export class Index<
   DATA_TEXTURE extends string = string,
   OUTPUT_TEXTURE extends string = string,
   UNIFORM extends string = string,
@@ -312,7 +312,7 @@ export class WebCLProgram<
     this.outputTexturesIndex = {} as typeof this.outputTexturesIndex;
   }
 
-  public static wirePrograms(programs: Record<string, WebCLProgram>): void {
+  public static wirePrograms(programs: Record<string, Index>): void {
     const outputTextures: Record<string, { texture: WebGLTexture; items: number; name: string }> = {};
     const inputTextures: Record<string, { texture: WebGLTexture; items: number; name: string }> = {};
 

@@ -1,13 +1,13 @@
 import { getRegionsCount } from "../../utils/quadtree";
-import { WebCLProgram } from "../../utils/webcl-program";
+import { Index } from "../webCLProgram";
 import { getTextureSize } from "../../utils/webgl";
-import { getQuadTreeAggregateFragmentShader } from "../shaders/fragment-quadtree-aggregate";
-import { getQuadTreeBoundariesFragmentShader } from "../shaders/fragment-quadtree-boundaries";
-import { getQuadTreeIndexFragmentShader } from "../shaders/fragment-quadtree-index";
-import { getQuadTreeOffsetFragmentShader } from "../shaders/fragment-quadtree-offset";
-import { getQuadTreeSetupSortFragmentShader } from "../shaders/fragment-quadtree-setup-sort";
-import { getVertexShader } from "../shaders/vertex-basic";
-import { BitonicSortGPU } from "./bitonicSortGPU";
+import { getQuadTreeAggregateFragmentShader } from "./fragment-aggregate";
+import { getQuadTreeBoundariesFragmentShader } from "./fragment-boundaries";
+import { getQuadTreeIndexFragmentShader } from "./fragment-index";
+import { getQuadTreeOffsetFragmentShader } from "./fragment-offset";
+import { getQuadTreeSetupSortFragmentShader } from "./fragment-setup-sort";
+import { getVertexShader } from "../webCLProgram/vertex";
+import { BitonicSortGPU } from "../bitonicSortGPU";
 
 const ATTRIBUTES_PER_ITEM = {
   boundaries: 4,
@@ -37,11 +37,11 @@ export class QuadTreeGPU {
   private params: QuadTreeGPUSettings;
 
   // Programs:
-  private boundariesProgram: WebCLProgram<"nodesPosition", "boundaries">;
-  private indexProgram: WebCLProgram<"nodesPosition" | "boundaries", "nodesRegionsIDs">;
-  private aggregateProgram: WebCLProgram<"nodesPosition" | "nodesRegionsIDs", "regionsBarycenters">;
-  private offsetProgram: WebCLProgram<"regionsBarycenters", "regionsOffsets">;
-  private setupSortProgram: WebCLProgram<"nodesRegionsIDs", "values" | "sortOn">;
+  private boundariesProgram: Index<"nodesPosition", "boundaries">;
+  private indexProgram: Index<"nodesPosition" | "boundaries", "nodesRegionsIDs">;
+  private aggregateProgram: Index<"nodesPosition" | "nodesRegionsIDs", "regionsBarycenters">;
+  private offsetProgram: Index<"regionsBarycenters", "regionsOffsets">;
+  private setupSortProgram: Index<"nodesRegionsIDs", "values" | "sortOn">;
   private bitonicSort: BitonicSortGPU;
 
   constructor(
@@ -55,7 +55,7 @@ export class QuadTreeGPU {
     const regionsCount = getRegionsCount(this.params.depth);
 
     // Initialize programs:
-    this.boundariesProgram = new WebCLProgram({
+    this.boundariesProgram = new Index({
       gl,
       fragments: 1,
       fragmentShaderSource: getQuadTreeBoundariesFragmentShader({
@@ -68,7 +68,7 @@ export class QuadTreeGPU {
       outputTextures: [{ name: "boundaries", attributesPerItem: ATTRIBUTES_PER_ITEM.boundaries }],
     });
 
-    this.indexProgram = new WebCLProgram({
+    this.indexProgram = new Index({
       gl,
       fragments: nodesCount,
       fragmentShaderSource: getQuadTreeIndexFragmentShader({
@@ -83,7 +83,7 @@ export class QuadTreeGPU {
       outputTextures: [{ name: "nodesRegionsIDs", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesRegionsIDs }],
     });
 
-    this.aggregateProgram = new WebCLProgram({
+    this.aggregateProgram = new Index({
       gl,
       fragments: regionsCount,
       fragmentShaderSource: getQuadTreeAggregateFragmentShader({
@@ -98,7 +98,7 @@ export class QuadTreeGPU {
       outputTextures: [{ name: "regionsBarycenters", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsBarycenters }],
     });
 
-    this.offsetProgram = new WebCLProgram({
+    this.offsetProgram = new Index({
       gl,
       fragments: regionsCount,
       fragmentShaderSource: getQuadTreeOffsetFragmentShader({
@@ -111,7 +111,7 @@ export class QuadTreeGPU {
       outputTextures: [{ name: "regionsOffsets", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsOffsets }],
     });
 
-    this.setupSortProgram = new WebCLProgram({
+    this.setupSortProgram = new Index({
       gl,
       fragments: regionsCount,
       fragmentShaderSource: getQuadTreeSetupSortFragmentShader({
@@ -142,7 +142,7 @@ export class QuadTreeGPU {
     const { boundariesProgram, indexProgram, aggregateProgram, offsetProgram, setupSortProgram } = this;
 
     if (nodesTexture) boundariesProgram.dataTexturesIndex.nodesPosition.texture = nodesTexture;
-    WebCLProgram.wirePrograms({ boundariesProgram, indexProgram, aggregateProgram, offsetProgram, setupSortProgram });
+    Index.wirePrograms({ boundariesProgram, indexProgram, aggregateProgram, offsetProgram, setupSortProgram });
   }
 
   public async compute() {

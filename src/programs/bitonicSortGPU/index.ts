@@ -1,7 +1,7 @@
-import { WebCLProgram } from "../../utils/webcl-program";
+import { Index } from "../webCLProgram";
 import { getTextureSize } from "../../utils/webgl";
-import { getBitonicSortFragmentShader } from "../shaders/fragment-bitonic-sort";
-import { getVertexShader } from "../shaders/vertex-basic";
+import { getVertexShader } from "../webCLProgram/vertex";
+import { getBitonicSortFragmentShader } from "./fragment";
 
 export class BitonicSortGPU {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -11,7 +11,7 @@ export class BitonicSortGPU {
   private extendedValuesCount: number;
   private textureSize: number;
   private attributesPerItem: number;
-  private bitonicProgram: WebCLProgram<"values" | "sortOn", "sortedValue", "pass" | "stage">;
+  private bitonicProgram: Index<"values" | "sortOn", "sortedValue", "pass" | "stage">;
 
   constructor(
     gl: WebGL2RenderingContext,
@@ -23,7 +23,7 @@ export class BitonicSortGPU {
     this.textureSize = getTextureSize(this.extendedValuesCount);
     this.attributesPerItem = attributesPerItem;
 
-    this.bitonicProgram = new WebCLProgram({
+    this.bitonicProgram = new Index({
       gl,
       fragments: this.extendedValuesCount,
       fragmentShaderSource: getBitonicSortFragmentShader({

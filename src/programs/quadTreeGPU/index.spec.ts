@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { getMortonIdDepth, getRegionsCount } from "../../utils/quadtree";
 import { setupWebGL2Context, waitForGPUCompletion } from "../../utils/webgl";
-import { QuadTreeGPU, QuadTreeNode } from "./quadTreeGPU";
+import { QuadTreeGPU, QuadTreeNode } from "./index";
 
 interface Test {
   canvas: HTMLCanvasElement;

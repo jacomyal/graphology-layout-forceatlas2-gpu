@@ -2,8 +2,6 @@ import { Attributes, EdgeMapper } from "graphology-types";
 
 import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Settings } from "./consts";
 
-export type LayoutMapping = { [key: string]: { x: number; y: number } };
-
 export type ForceAtlas2LayoutParameters<
   NodeAttributes extends Attributes = Attributes,
   EdgeAttributes extends Attributes = Attributes,

@@ -2,7 +2,7 @@ import { range, shuffle, sortBy } from "lodash";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { setupWebGL2Context } from "../../utils/webgl";
-import { BitonicSortGPU } from "./bitonicSortGPU";
+import { BitonicSortGPU } from "./index";
 
 interface Test {
   canvas: HTMLCanvasElement;
