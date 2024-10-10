@@ -1,0 +1,55 @@
+<html>
+  <script type="module" crossorigin src="/graphology-layout-forceatlas2-gpu/assets/index-9XsLU8wK.js"></script>
+
+  <body>
+    <style>
+      html,
+      body,
+      #stage {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        font-family: sans-serif;
+        font-size: 0.9em;
+      }
+      .overlay {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        padding: 10px;
+        background: #ffffff99;
+      }
+      .overlay ul {
+        margin: 0;
+        padding: 0;
+      }
+      canvas.sigma-mouse {
+        z-index: 1;
+      }
+      .rps-counter {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        padding: 10px;
+        color: darkred;
+        background: #ffffff99;
+      }
+      button {
+        position: absolute;
+        top: 0;
+        right: 0;
+        margin: 10px;
+        padding: 5px;
+        background: white;
+        z-index: 2;
+      }
+    </style>
+    <div id="stage"></div>
+    <div class="overlay">
+      <ul></ul>
+    </div>
+    <button>Toggle FA2</button>
+  </body>
+</html>
