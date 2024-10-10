@@ -2,12 +2,12 @@ import Graph from "graphology";
 import { EdgeDisplayData, NodeDisplayData } from "sigma/types";
 
 import { getRegionsCount } from "../../utils/quadtree";
-import { Index } from "../webCLProgram";
 import { getTextureSize, waitForGPUCompletion } from "../../utils/webgl";
+import { QuadTreeGPU } from "../quadTreeGPU";
+import { Index } from "../webCLProgram";
+import { getVertexShader } from "../webCLProgram/vertex";
 import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Cursors, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
 import { getForceAtlas2FragmentShader } from "./fragment";
-import { getVertexShader } from "../webCLProgram/vertex";
-import { QuadTreeGPU } from "../quadTreeGPU";
 
 const ATTRIBUTES_PER_ITEM = {
   nodesPosition: 4,
@@ -101,14 +101,8 @@ export class ForceAtlas2GPU {
       gl,
       fragments: this.graph.order,
       fragmentShaderSource: getForceAtlas2FragmentShader({
+        ...this.params,
         graph,
-        quadTreeDepth: this.params.quadTreeDepth,
-        quadTreeTheta: this.params.quadTreeTheta,
-        linLogMode: this.params.linLogMode,
-        adjustSizes: this.params.adjustSizes,
-        strongGravityMode: this.params.strongGravityMode,
-        outboundAttractionDistribution: this.params.outboundAttractionDistribution,
-        enableQuadTree: this.params.enableQuadTree,
       }),
       vertexShaderSource: getVertexShader(),
       dataTextures: [
@@ -282,6 +276,8 @@ export class ForceAtlas2GPU {
    * ***********
    */
   public start(steps = 1) {
+    this.readGraph();
+
     this.remainingSteps = steps;
     this.running = true;
     this.fa2Program.setTextureData("nodesPosition", this.nodesPositionArray, this.graph.order);

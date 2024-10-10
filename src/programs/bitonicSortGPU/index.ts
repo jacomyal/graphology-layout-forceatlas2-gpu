@@ -1,5 +1,5 @@
-import { Index } from "../webCLProgram";
 import { getTextureSize } from "../../utils/webgl";
+import { Index } from "../webCLProgram";
 import { getVertexShader } from "../webCLProgram/vertex";
 import { getBitonicSortFragmentShader } from "./fragment";
 

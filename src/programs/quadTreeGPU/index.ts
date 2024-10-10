@@ -1,13 +1,13 @@
 import { getRegionsCount } from "../../utils/quadtree";
-import { Index } from "../webCLProgram";
 import { getTextureSize } from "../../utils/webgl";
+import { BitonicSortGPU } from "../bitonicSortGPU";
+import { Index } from "../webCLProgram";
+import { getVertexShader } from "../webCLProgram/vertex";
 import { getQuadTreeAggregateFragmentShader } from "./fragment-aggregate";
 import { getQuadTreeBoundariesFragmentShader } from "./fragment-boundaries";
 import { getQuadTreeIndexFragmentShader } from "./fragment-index";
 import { getQuadTreeOffsetFragmentShader } from "./fragment-offset";
 import { getQuadTreeSetupSortFragmentShader } from "./fragment-setup-sort";
-import { getVertexShader } from "../webCLProgram/vertex";
-import { BitonicSortGPU } from "../bitonicSortGPU";
 
 const ATTRIBUTES_PER_ITEM = {
   boundaries: 4,
