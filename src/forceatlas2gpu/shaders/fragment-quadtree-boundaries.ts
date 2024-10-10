@@ -30,8 +30,8 @@ void main() {
   float yMin;
   float yMax;
 
-  for (float j = 1.0; j < NODES_COUNT; j++) {
-    vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
+  for (float i = 0.0; i < NODES_COUNT; i++) {
+    vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, i, NODES_TEXTURE_SIZE);
 
     if (!hasSetValues) {
       xMin = nodePosition.x;

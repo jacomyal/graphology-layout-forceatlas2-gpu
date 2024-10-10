@@ -25,6 +25,7 @@ in vec2 v_textureCoord;
 
 // Output
 layout(location = 0) out vec4 regionsBarycenters;
+layout(location = 1) out vec4 regionsNodesCount;
 
 // Additional helpers:
 ${GLSL_getValueInTexture}
@@ -33,27 +34,22 @@ ${GLSL_getMortonIdDepth}
 
 void main() {
   float regionIndex = getIndex(v_textureCoord, REGIONS_TEXTURE_SIZE);
-  float regionID = regionIndex + 1.0;
-  int regionDepth = getMortonIdDepth(int(regionID));
+  int regionDepth = getMortonIdDepth(int(regionIndex));
 
   if (regionDepth > MAX_DEPTH) return;
 
-  bool isRegionEmpty = true;
   float aggregatedX = 0.0;
   float aggregatedY = 0.0;
   float aggregatedMass = 0.0;
-  float minX;
-  float maxX;
-  float minY;
-  float maxY;
+  float nodesCount = 0.0;
 
-  for (float j = 0.0; j < NODES_COUNT; j++) {
-    vec4 nodeRegionIDs = getValueInTexture(u_nodesRegionsIDsTexture, j, NODES_TEXTURE_SIZE);
+  for (float i = 0.0; i < NODES_COUNT; i++) {
+    vec4 nodeRegionIDs = getValueInTexture(u_nodesRegionsIDsTexture, i, NODES_TEXTURE_SIZE);
     float regionAtDepth = nodeRegionIDs[regionDepth - 1];
 
     // Only add nodes that are in this region at this depth level:
-    if (regionAtDepth != regionID) {
-      vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
+    if (regionAtDepth == regionIndex) {
+      vec4 nodePosition = getValueInTexture(u_nodesPositionTexture, i, NODES_TEXTURE_SIZE);
       float x = nodePosition.x;
       float y = nodePosition.y;
       float mass = nodePosition.z;
@@ -61,32 +57,19 @@ void main() {
       aggregatedX += x * mass;
       aggregatedY += y * mass;
       aggregatedMass += mass;
-
-      if (isRegionEmpty) {
-        minX = x;
-        maxX = x;
-        minY = y;
-        maxY = y;
-      } else {
-        minX = min(minX, x);
-        maxX = max(maxX, x);
-        minY = min(minY, y);
-        maxY = max(maxY, y);
-      }
-
-      isRegionEmpty = false;
+      nodesCount++;
     }
   }
 
-  float regionSize = isRegionEmpty ? 0.0 : max(maxX - minX, maxY - minY);
+  if (nodesCount > 0.0) {
+    aggregatedX /= aggregatedMass;
+    aggregatedY /= aggregatedMass;
 
-  aggregatedX /= aggregatedMass;
-  aggregatedY /= aggregatedMass;
-
-  regionsBarycenters.x = aggregatedX;
-  regionsBarycenters.y = aggregatedY;
-  regionsBarycenters.z = aggregatedMass;
-  regionsBarycenters.w = regionSize * regionSize;
+    regionsBarycenters.x = aggregatedX;
+    regionsBarycenters.y = aggregatedY;
+    regionsBarycenters.z = aggregatedMass;
+    regionsBarycenters.w = nodesCount;
+  }
 }`;
 
   return SHADER;

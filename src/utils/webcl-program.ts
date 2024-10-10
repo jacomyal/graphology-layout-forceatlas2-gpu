@@ -9,10 +9,17 @@ export class WebCLProgram<
   public program: WebGLProgram;
   public gl: WebGL2RenderingContext;
   public size: number;
+  public fragments: number;
 
   public uniformLocations: Partial<Record<UNIFORM, WebGLUniformLocation>> = {};
 
-  public dataTextures: { name: DATA_TEXTURE; attributesPerItem: number; index: number; texture: WebGLTexture }[];
+  public dataTextures: {
+    name: DATA_TEXTURE;
+    attributesPerItem: number;
+    items: number;
+    index: number;
+    texture: WebGLTexture;
+  }[];
   public dataTexturesIndex: Record<DATA_TEXTURE, (typeof this.dataTextures)[number]>;
 
   public outputBuffer: WebGLFramebuffer;
@@ -34,13 +41,14 @@ export class WebCLProgram<
   }: {
     gl: WebGL2RenderingContext;
     fragments: number;
-    dataTextures: { name: DATA_TEXTURE; attributesPerItem: number }[];
+    dataTextures: { name: DATA_TEXTURE; attributesPerItem: number; items: number }[];
     outputTextures: { name: OUTPUT_TEXTURE; attributesPerItem: number }[];
     fragmentShaderSource: string;
     vertexShaderSource: string;
   }) {
     this.gl = gl;
     this.size = getTextureSize(fragments);
+    this.fragments = fragments;
     this.dataTextures = dataTextures.map((spec, index) => ({
       ...spec,
       index,
@@ -215,11 +223,50 @@ export class WebCLProgram<
 
   public getOutput(textureName: OUTPUT_TEXTURE) {
     const { gl, size } = this;
-    const { attributesPerItem, index } = this.outputTexturesIndex[textureName];
+    const { attributesPerItem, index, texture } = this.outputTexturesIndex[textureName];
+
+    gl.activeTexture(gl.TEXTURE0 + index);
+
+    const framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      throw new Error("Failed to create framebuffer for reading texture data.");
+    }
 
     const outputArr = new Float32Array(size * size * attributesPerItem);
-    gl.readBuffer(gl[`COLOR_ATTACHMENT${index}` as "COLOR_ATTACHMENT0"]);
     gl.readPixels(0, 0, size, size, DATA_TEXTURES_FORMATS[attributesPerItem], gl.FLOAT, outputArr);
+
+    // Cleanup:
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(framebuffer);
+
+    return outputArr;
+  }
+
+  // For testing purpose only
+  public getInput(textureName: DATA_TEXTURE) {
+    const { gl } = this;
+    const { attributesPerItem, items, index, texture } = this.dataTexturesIndex[textureName];
+    const textureSize = getTextureSize(items);
+
+    gl.activeTexture(gl.TEXTURE0 + index);
+
+    const framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      throw new Error("Failed to create framebuffer for reading texture data.");
+    }
+
+    const outputArr = new Float32Array(textureSize * textureSize * attributesPerItem);
+    gl.readPixels(0, 0, textureSize, textureSize, DATA_TEXTURES_FORMATS[attributesPerItem], gl.FLOAT, outputArr);
+
+    // Cleanup:
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(framebuffer);
 
     return outputArr;
   }
@@ -240,5 +287,51 @@ export class WebCLProgram<
     });
     this.outputTextures = [];
     this.outputTexturesIndex = {} as typeof this.outputTexturesIndex;
+  }
+
+  public static wirePrograms(programs: Record<string, WebCLProgram>): void {
+    const outputTextures: Record<string, { texture: WebGLTexture; items: number; name: string }> = {};
+    const inputTextures: Record<string, { texture: WebGLTexture; items: number; name: string }> = {};
+
+    // For each input texture:
+    // - Use existing output texture if any
+    // - Else, use existing input texture if any
+    // - Else, save input texture for later
+    // Then, index all output textures
+    for (const name in programs) {
+      const program = programs[name];
+
+      for (const textureName in program.dataTexturesIndex) {
+        if (outputTextures[textureName]) {
+          if (outputTextures[textureName].items !== program.dataTexturesIndex[textureName].items)
+            throw new Error(
+              `Cannot bind output texture "${textureName}" from "${outputTextures[textureName].name}" to "${name}": Size mismatch (${outputTextures[textureName].name}: ${outputTextures[textureName].items}, ${name}: ${program.dataTexturesIndex[textureName].items})`,
+            );
+          program.gl.deleteTexture(program.dataTexturesIndex[textureName].texture);
+          program.dataTexturesIndex[textureName].texture = outputTextures[textureName].texture;
+        } else if (inputTextures[textureName]) {
+          if (inputTextures[textureName].items !== program.dataTexturesIndex[textureName].items)
+            throw new Error(
+              `Cannot bind data texture "${textureName}" from "${inputTextures[textureName].name}" to "${name}": Size mismatch (${inputTextures[textureName].name}: ${inputTextures[textureName].items}, ${name}: ${program.dataTexturesIndex[textureName].items})`,
+            );
+          program.gl.deleteTexture(program.dataTexturesIndex[textureName].texture);
+          program.dataTexturesIndex[textureName].texture = inputTextures[textureName].texture;
+        } else {
+          inputTextures[textureName] = {
+            texture: program.dataTexturesIndex[textureName].texture,
+            items: program.dataTexturesIndex[textureName].items,
+            name,
+          };
+        }
+      }
+
+      for (const textureName in program.outputTexturesIndex) {
+        outputTextures[textureName] = {
+          texture: program.outputTexturesIndex[textureName].texture,
+          items: program.fragments,
+          name,
+        };
+      }
+    }
   }
 }

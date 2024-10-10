@@ -1,7 +1,8 @@
 import { range, shuffle, sortBy } from "lodash";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-import { BitonicSortGPU, setupWebGL2Context } from "./bitonicSortGPU";
+import { setupWebGL2Context } from "../../utils/webgl";
+import { BitonicSortGPU } from "./bitonicSortGPU";
 
 interface Test {
   canvas: HTMLCanvasElement;
