@@ -4,17 +4,17 @@ import { GLSL_getIndex, GLSL_getValueInTexture, getTextureSize, numberToGLSLFloa
  * This shader is used to sort the values from valuesTexture, based on the
  * values in sortOnTexture, using the Bitonic Sort.
  */
-export function getBitonicSortFragmentShader({ valuesCount }: { valuesCount: number }) {
+export function getBitonicSortFragmentShader({ length }: { length: number }) {
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
 precision highp float;
 
-#define TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(valuesCount))}
-#define VALUES_COUNT ${numberToGLSLFloat(valuesCount)}
+#define TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(length))}
+#define VALUES_COUNT ${numberToGLSLFloat(length)}
 
 uniform sampler2D u_valuesTexture;
 uniform sampler2D u_sortOnTexture;
-  
+
 uniform float u_stage;
 uniform float u_pass;
 in vec2 v_textureCoord;

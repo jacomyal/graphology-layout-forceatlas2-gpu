@@ -1,3 +1,20 @@
+export function setupWebGL2Context() {
+  // Initialize WebGL2 context:
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 1;
+  const gl = canvas.getContext("webgl2");
+  if (!gl) throw new Error("WebGL2 is not supported in this browser.");
+
+  // Check for required extension
+  const ext = gl.getExtension("EXT_color_buffer_float");
+  if (!ext) {
+    throw new Error("EXT_color_buffer_float extension not supported");
+  }
+
+  return { canvas, gl };
+}
+
 export function getTextureSize(itemsCount: number) {
   return Math.ceil(Math.sqrt(itemsCount));
 }

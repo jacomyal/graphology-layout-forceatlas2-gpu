@@ -1,4 +1,5 @@
 import { WebCLProgram } from "../../utils/webcl-program";
+import { getTextureSize } from "../../utils/webgl";
 import { getBitonicSortFragmentShader } from "../shaders/fragment-bitonic-sort";
 import { getVertexShader } from "../shaders/vertex-basic";
 
@@ -10,17 +11,21 @@ export class BitonicSortGPU {
   // @ts-ignore
   private gl: WebGL2RenderingContext;
   private valuesCount: number;
+  private extendedValuesCount: number;
+  private textureSize: number;
   private bitonicProgram: WebCLProgram<"values" | "sortOn", "sortedValue", "pass" | "stage">;
 
   constructor(gl: WebGL2RenderingContext, { valuesCount }: { valuesCount: number }) {
     this.gl = gl;
     this.valuesCount = valuesCount;
+    this.extendedValuesCount = 2 ** Math.ceil(Math.log2(valuesCount));
+    this.textureSize = getTextureSize(this.extendedValuesCount);
 
     this.bitonicProgram = new WebCLProgram({
       gl,
-      fragments: valuesCount,
+      fragments: this.extendedValuesCount,
       fragmentShaderSource: getBitonicSortFragmentShader({
-        valuesCount,
+        length: this.extendedValuesCount,
       }),
       vertexShaderSource: getVertexShader(),
       dataTextures: [
@@ -42,15 +47,23 @@ export class BitonicSortGPU {
     bitonicProgram.dataTexturesIndex.sortOn.texture = sortOnTexture;
   }
 
-  public setData({ values, sortOn }: { values: Float32Array; sortOn: Float32Array }) {
-    const { bitonicProgram } = this;
+  public setData(sortOn: number[], tooHighValue: number) {
+    const { bitonicProgram, valuesCount, extendedValuesCount, textureSize } = this;
 
-    bitonicProgram.setTextureData("values", values, this.valuesCount);
-    bitonicProgram.setTextureData("sortOn", sortOn, this.valuesCount);
+    const valuesByteArray = new Float32Array(textureSize ** 2);
+    const sortOnByteArray = new Float32Array(textureSize ** 2);
+
+    for (let i = 0; i < extendedValuesCount; i++) {
+      valuesByteArray[i] = i;
+      sortOnByteArray[i] = i < valuesCount ? sortOn[i] : tooHighValue;
+    }
+
+    bitonicProgram.setTextureData("values", valuesByteArray, this.extendedValuesCount);
+    bitonicProgram.setTextureData("sortOn", sortOnByteArray, this.extendedValuesCount);
   }
 
   public getSortedValues() {
-    return this.bitonicProgram.getOutput("sortedValue");
+    return Array.from(this.bitonicProgram.getOutput("sortedValue")).slice(0, this.valuesCount);
   }
 
   public getSortedTexture() {
@@ -58,13 +71,13 @@ export class BitonicSortGPU {
   }
 
   public async sort() {
-    const { valuesCount, bitonicProgram } = this;
+    const { extendedValuesCount, bitonicProgram } = this;
 
     // Activate program:
     bitonicProgram.activate();
 
     let passesCount = 0;
-    const maxStage = Math.floor(Math.log2(valuesCount));
+    const maxStage = Math.log2(extendedValuesCount);
     for (let stage = 0; stage < maxStage; stage++) {
       for (let pass = 0; pass <= stage; pass++) {
         if (passesCount > 0) {
