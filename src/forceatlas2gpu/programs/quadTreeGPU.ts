@@ -14,7 +14,7 @@ const ATTRIBUTES_PER_ITEM = {
   nodesPosition: 4,
   nodesRegionsIDs: 4,
   regionsBarycenters: 4,
-  regionsOffsets: 2,
+  regionsOffsets: 4,
   values: 4,
   sortOn: 4,
 } as const;
@@ -128,7 +128,7 @@ export class QuadTreeGPU {
       ],
     });
 
-    this.bitonicSort = new BitonicSortGPU(gl, { valuesCount: nodesCount });
+    this.bitonicSort = new BitonicSortGPU(gl, { valuesCount: nodesCount, attributesPerItem: 4 });
 
     // Initial data textures rebind:
     this.wireTextures(nodesTexture);
@@ -193,6 +193,21 @@ export class QuadTreeGPU {
   }
   public getNodesInRegionsTexture(): WebGLTexture {
     return this.bitonicSort.getSortedTexture();
+  }
+  public getBoundariesTexture(): WebGLTexture {
+    return this.boundariesProgram.outputTexturesIndex.boundaries.texture;
+  }
+  public getPrograms() {
+    const { boundariesProgram, indexProgram, aggregateProgram, offsetProgram, setupSortProgram, bitonicSort } = this;
+
+    return {
+      boundariesProgram,
+      indexProgram,
+      aggregateProgram,
+      offsetProgram,
+      setupSortProgram,
+      ...bitonicSort.getPrograms(),
+    };
   }
 
   // These methods are for using the quad-tree directly (and for testing):

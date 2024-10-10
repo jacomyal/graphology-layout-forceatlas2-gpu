@@ -1,5 +1,18 @@
-import { DATA_TEXTURES_FORMATS, DATA_TEXTURES_LEVELS } from "../forceatlas2gpu/consts";
 import { compileShader, getTextureSize } from "./webgl";
+
+export const DATA_TEXTURES_LEVELS: Record<number, number> = {
+  1: WebGL2RenderingContext.R32F,
+  2: WebGL2RenderingContext.RG32F,
+  3: WebGL2RenderingContext.RGB32F,
+  4: WebGL2RenderingContext.RGBA32F,
+};
+
+export const DATA_TEXTURES_FORMATS: Record<number, number> = {
+  1: WebGL2RenderingContext.RED,
+  2: WebGL2RenderingContext.RG,
+  3: WebGL2RenderingContext.RGB,
+  4: WebGL2RenderingContext.RGBA,
+};
 
 export class WebCLProgram<
   DATA_TEXTURE extends string = string,
@@ -222,25 +235,35 @@ export class WebCLProgram<
   }
 
   public getOutput(textureName: OUTPUT_TEXTURE) {
-    const { gl, size } = this;
-    const { attributesPerItem, index, texture } = this.outputTexturesIndex[textureName];
+    const { gl, outputBuffer, outputTexturesIndex, size } = this;
+    const { attributesPerItem, index } = this.outputTexturesIndex[textureName];
 
-    gl.activeTexture(gl.TEXTURE0 + index);
+    // Bind the framebuffer that contains the output textures
+    gl.bindFramebuffer(gl.FRAMEBUFFER, outputBuffer);
 
-    const framebuffer = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      throw new Error("Failed to create framebuffer for reading texture data.");
+    // Ensure the output texture exists
+    const outputTexture = outputTexturesIndex[textureName];
+    if (!outputTexture) {
+      throw new Error(`Output texture at index ${textureName} does not exist.`);
     }
 
-    const outputArr = new Float32Array(size * size * attributesPerItem);
+    // Check the framebuffer status
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      throw new Error("Framebuffer is not complete");
+    }
+
+    // Bind the output texture as the current read buffer
+    gl.readBuffer(gl[`COLOR_ATTACHMENT${index}` as "COLOR_ATTACHMENT0"]);
+
+    // Create a Float32Array to hold the data
+    const outputArr = new Float32Array(size * size * attributesPerItem); // Assuming RGBA float data
+
+    // Read the pixels from the framebuffer
     gl.readPixels(0, 0, size, size, DATA_TEXTURES_FORMATS[attributesPerItem], gl.FLOAT, outputArr);
 
-    // Cleanup:
+    // Unbind the framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.deleteFramebuffer(framebuffer);
 
     return outputArr;
   }
@@ -307,14 +330,12 @@ export class WebCLProgram<
             throw new Error(
               `Cannot bind output texture "${textureName}" from "${outputTextures[textureName].name}" to "${name}": Size mismatch (${outputTextures[textureName].name}: ${outputTextures[textureName].items}, ${name}: ${program.dataTexturesIndex[textureName].items})`,
             );
-          program.gl.deleteTexture(program.dataTexturesIndex[textureName].texture);
           program.dataTexturesIndex[textureName].texture = outputTextures[textureName].texture;
         } else if (inputTextures[textureName]) {
           if (inputTextures[textureName].items !== program.dataTexturesIndex[textureName].items)
             throw new Error(
               `Cannot bind data texture "${textureName}" from "${inputTextures[textureName].name}" to "${name}": Size mismatch (${inputTextures[textureName].name}: ${inputTextures[textureName].items}, ${name}: ${program.dataTexturesIndex[textureName].items})`,
             );
-          program.gl.deleteTexture(program.dataTexturesIndex[textureName].texture);
           program.dataTexturesIndex[textureName].texture = inputTextures[textureName].texture;
         } else {
           inputTextures[textureName] = {

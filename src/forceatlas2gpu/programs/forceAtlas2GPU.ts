@@ -1,15 +1,13 @@
 import Graph from "graphology";
 import { EdgeDisplayData, NodeDisplayData } from "sigma/types";
 
-import { WebCLProgram } from "../utils/webcl-program";
-import { getTextureSize, waitForGPUCompletion } from "../utils/webgl";
-import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Cursors, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
+import { getRegionsCount } from "../../utils/quadtree";
+import { WebCLProgram } from "../../utils/webcl-program";
+import { getTextureSize, waitForGPUCompletion } from "../../utils/webgl";
+import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Cursors, ForceAtlas2Settings, UNIFORM_SETTINGS } from "../consts";
+import { getForceAtlas2FragmentShader } from "../shaders/fragment-force-atlas-2";
+import { getVertexShader } from "../shaders/vertex-basic";
 import { QuadTreeGPU } from "./quadTreeGPU";
-import { getForceAtlas2FragmentShader } from "./shaders/fragment-force-atlas-2";
-import { getVertexShader } from "./shaders/vertex-basic";
-
-export * from "./consts";
-export * from "../utils/webgl";
 
 const ATTRIBUTES_PER_ITEM = {
   nodesPosition: 4,
@@ -18,6 +16,9 @@ const ATTRIBUTES_PER_ITEM = {
   edges: 2,
   nodesRegions: 4,
   regionsBarycenters: 4,
+  regionsOffsets: 2,
+  nodesInRegions: 1,
+  boundaries: 4,
 } as const;
 
 export type ForceAtlas2Graph = Graph<NodeDisplayData, EdgeDisplayData & { weight?: number }>;
@@ -51,7 +52,15 @@ export class ForceAtlas2GPU {
 
   // Programs:
   private fa2Program: WebCLProgram<
-    "nodesPosition" | "nodesMovement" | "nodesMetadata" | "edges" | "nodesRegions" | "regionsBarycenters",
+    | "nodesPosition"
+    | "nodesMovement"
+    | "nodesMetadata"
+    | "edges"
+    | "nodesRegions"
+    | "regionsBarycenters"
+    | "regionsOffsets"
+    | "nodesInRegions"
+    | "boundaries",
     "nodesPosition" | "nodesMovement"
   >;
   private quadTree: QuadTreeGPU;
@@ -87,6 +96,7 @@ export class ForceAtlas2GPU {
     }
 
     // Initialize programs:
+    const regionsCount = getRegionsCount(this.params.quadTreeDepth);
     this.fa2Program = new WebCLProgram({
       gl,
       fragments: this.graph.order,
@@ -102,12 +112,16 @@ export class ForceAtlas2GPU {
       }),
       vertexShaderSource: getVertexShader(),
       dataTextures: [
-        { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition },
-        { name: "nodesMovement", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMovement },
-        { name: "nodesMetadata", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMetadata },
-        { name: "edges", attributesPerItem: ATTRIBUTES_PER_ITEM.edges },
-        { name: "nodesRegions", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesRegions },
-        { name: "regionsBarycenters", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsBarycenters },
+        { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition, items: graph.order },
+        { name: "nodesMovement", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMovement, items: graph.order },
+        { name: "nodesMetadata", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMetadata, items: graph.order },
+        { name: "edges", attributesPerItem: ATTRIBUTES_PER_ITEM.edges, items: graph.size },
+        // Quad-tree data textures:
+        { name: "nodesRegions", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesRegions, items: graph.order },
+        { name: "regionsBarycenters", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsBarycenters, items: regionsCount },
+        { name: "regionsOffsets", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsOffsets, items: regionsCount },
+        { name: "nodesInRegions", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesInRegions, items: graph.order },
+        { name: "boundaries", attributesPerItem: ATTRIBUTES_PER_ITEM.boundaries, items: 1 },
       ],
       outputTextures: [
         { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition },
@@ -119,6 +133,9 @@ export class ForceAtlas2GPU {
 
     this.fa2Program.dataTexturesIndex.nodesRegions.texture = this.quadTree.getNodesRegionsTexture();
     this.fa2Program.dataTexturesIndex.regionsBarycenters.texture = this.quadTree.getRegionsBarycentersTexture();
+    this.fa2Program.dataTexturesIndex.regionsOffsets.texture = this.quadTree.getRegionsOffsetsTexture();
+    this.fa2Program.dataTexturesIndex.nodesInRegions.texture = this.quadTree.getNodesInRegionsTexture();
+    this.fa2Program.dataTexturesIndex.boundaries.texture = this.quadTree.getBoundariesTexture();
   }
 
   private readGraph() {
@@ -197,6 +214,7 @@ export class ForceAtlas2GPU {
   private updateGraph() {
     const { graph } = this;
 
+    this.fa2Program.activate();
     const nodesPosition = this.fa2Program.getOutput("nodesPosition");
 
     graph.forEachNode((n) => {
@@ -213,15 +231,8 @@ export class ForceAtlas2GPU {
 
   private swapFA2Textures() {
     const { fa2Program } = this;
-
-    [fa2Program.dataTexturesIndex.nodesPosition.texture, fa2Program.outputTexturesIndex.nodesPosition.texture] = [
-      fa2Program.outputTexturesIndex.nodesPosition.texture,
-      fa2Program.dataTexturesIndex.nodesPosition.texture,
-    ];
-    [fa2Program.dataTexturesIndex.nodesMovement.texture, fa2Program.outputTexturesIndex.nodesMovement.texture] = [
-      fa2Program.outputTexturesIndex.nodesMovement.texture,
-      fa2Program.dataTexturesIndex.nodesMovement.texture,
-    ];
+    fa2Program.swapTextures("nodesPosition", "nodesPosition");
+    fa2Program.swapTextures("nodesMovement", "nodesMovement");
   }
 
   private async step() {
@@ -247,7 +258,8 @@ export class ForceAtlas2GPU {
 
       // Compute quad-tree if needed:
       if (params.enableQuadTree) {
-        quadTree.compute(fa2Program.dataTexturesIndex.nodesPosition.texture);
+        quadTree.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
+        await quadTree.compute();
         fa2Program.activate();
       }
 
@@ -257,6 +269,7 @@ export class ForceAtlas2GPU {
 
       if (remainingIterations > 0) this.swapFA2Textures();
     }
+
     await waitForGPUCompletion(this.gl);
     this.updateGraph();
     this.swapFA2Textures();

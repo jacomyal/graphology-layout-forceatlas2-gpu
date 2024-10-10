@@ -49,6 +49,11 @@ uniform sampler2D u_edgesTexture;
 uniform sampler2D u_nodesRegionsTexture;
 uniform sampler2D u_regionsBarycentersTexture;
 
+uniform sampler2D u_regionsOffsetsTexture;
+uniform sampler2D u_nodesInRegionsTexture;
+  
+uniform sampler2D u_boundariesTexture;
+
 in vec2 v_textureCoord;
 
 // Settings management:
@@ -114,10 +119,24 @@ void main() {
   float repulsionCoefficient = u_scalingRatio;
 
   #ifdef QUAD_TREE_ENABLED
+    vec4 nodeRegions = getValueInTexture(u_nodesRegionsTexture, nodeIndex, NODES_TEXTURE_SIZE);
+
+    vec4 boundaries = getValueInTexture(u_boundariesTexture, 0.0, 1.0);
+    float xMin = boundaries[0];
+    float xMax = boundaries[1];
+    float yMin = boundaries[2];
+    float yMax = boundaries[3];
+    float rootSizeSquare = max(xMax - xMin, yMax - yMin);
+
     // Region-to-node repulsion (using quad tree):
     for (int regionId = 0; regionId < QUAD_TREE_REGIONS_COUNT; regionId++) {
       int depth = getMortonIdDepth(regionId);
       int parentId = getParentMortonId(regionId);
+      
+      // Skip current node's regions:
+      if (nodeRegions[depth - 1] == float(regionId)) {
+        continue;
+      } 
     
       // Skip regions whose parents have been used for repulsion:
       if (depth > 1 && isRegionUsed(parentId)) {
@@ -128,60 +147,91 @@ void main() {
       vec4 regionBarycenter = getValueInTexture(u_regionsBarycentersTexture, float(regionId), QUAD_TREE_REGIONS_TEXTURE_SIZE);
       vec2 regionCoordinates = regionBarycenter.xy;
       float regionMass = regionBarycenter.z;
-      float regionSizeSquare = regionBarycenter.w;
     
       vec2 diff = nodePosition.xy - regionCoordinates;
       float dSquare = dot(diff, diff);
+      float regionSizeSquare = rootSizeSquare / pow(2.0, float(depth));
     
       // Barnes-Hut Theta test:
       if (4.0 * regionSizeSquare / dSquare < QUAD_TREE_THETA_SQUARED) {
+        // If it's "far enough", we consider the region as a single body
         setRegionUsed(regionId);
         float factor = repulsionCoefficient * nodeMass * regionMass / dSquare;
         dx += diff.x * factor;
         dy += diff.y * factor;
+      } else {
+        // Else, if we are at the deepest level, we apply repulsion from each of its nodes
+        vec2 regionOffset = getValueInTexture(u_regionsOffsetsTexture, float(regionId), QUAD_TREE_REGIONS_TEXTURE_SIZE).xy;
+        float startIndex = regionOffset.y;
+        float endIndex = startIndex + regionOffset.x;
+
+        for (float j = startIndex; j < endIndex; j++) {
+          float otherNodeIndex = getValueInTexture(u_nodesInRegionsTexture, j, NODES_TEXTURE_SIZE).x;
+          vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
+          vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
+          float otherNodeMass = otherNodePosition.z;
+          float otherNodeSize = otherNodeMetadata.r;
+
+          vec2 diff = nodePosition.xy - otherNodePosition.xy;
+          float factor = 0.0;
+
+          #ifdef ADJUST_SIZES
+            // Anticollision Linear Repulsion
+            float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
+            if (d > 0.0) {
+              factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
+            } else if (d < 0.0) {
+              factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
+            }
+
+          #else
+            // Linear Repulsion
+            float dSquare = dot(diff, diff);
+            if (dSquare > 0.0) {
+              factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
+            }
+          #endif
+
+          dx += diff.x * factor;
+          dy += diff.y * factor;
+        }
       }
     }
-  #endif
 
-  // Node-to-node repulsion (no quad tree):
-  for (float j = 0.0; j < NODES_COUNT; j++) {
-    if (j == nodeIndex) continue;
-
-    #ifdef QUAD_TREE_ENABLED
-      vec4 otherNodeRegions = getValueInTexture(u_nodesRegionsTexture, j, NODES_TEXTURE_SIZE);
-      if (isRegionUsed(int(otherNodeRegions[QUAD_TREE_DEPTH]))) {
-        continue;
-      }
-    #endif
+  #else
+    // Node-to-node repulsion (no quad tree):
+    for (float j = 0.0; j < NODES_COUNT; j++) {
+      if (j == nodeIndex) continue;
+    
+      vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
+      vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, j, NODES_TEXTURE_SIZE);
+      float otherNodeMass = otherNodePosition.z;
+      float otherNodeSize = otherNodeMetadata.r;
   
-    vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, j, NODES_TEXTURE_SIZE);
-    vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, j, NODES_TEXTURE_SIZE);
-    float otherNodeMass = otherNodePosition.z;
-    float otherNodeSize = otherNodeMetadata.r;
-
-    vec2 diff = nodePosition.xy - otherNodePosition.xy;
-    float factor = 0.0;
-
-    #ifdef ADJUST_SIZES
-      // Anticollision Linear Repulsion
-      float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
-      if (d > 0.0) {
-        factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
-      } else if (d < 0.0) {
-        factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
-      }
-
-    #else
-      // Linear Repulsion
-      float dSquare = dot(diff, diff);
-      if (dSquare > 0.0) {
-        factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
-      }
-    #endif
-
-    dx += diff.x * factor;
-    dy += diff.y * factor;
-  }
+      vec2 diff = nodePosition.xy - otherNodePosition.xy;
+      float factor = 0.0;
+  
+      #ifdef ADJUST_SIZES
+        // Anticollision Linear Repulsion
+        float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
+        if (d > 0.0) {
+          factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
+        } else if (d < 0.0) {
+          factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
+        }
+  
+      #else
+        // Linear Repulsion
+        float dSquare = dot(diff, diff);
+        if (dSquare > 0.0) {
+          factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
+        }
+      #endif
+  
+      dx += diff.x * factor;
+      dy += diff.y * factor;
+    }
+  #endif
 
   // GRAVITY:
   float distanceToCenter = sqrt(x * x + y * y);

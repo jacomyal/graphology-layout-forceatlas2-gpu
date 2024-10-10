@@ -128,7 +128,12 @@ describe("Quad-tree GPU Program", () => {
       if (regionDepth === depth) offset += nodesCount;
       return res;
     });
-    expect(chunk(quadTree.getRegionsOffsets(), 2).slice(0, regionsCount)).toEqual(expectedOffsets);
+    const allRegionsOffsetData = quadTree.getRegionsOffsets();
+    const regionsOffsets = range(0, regionsCount).map((i) => [
+      allRegionsOffsetData[i * 4],
+      allRegionsOffsetData[i * 4 + 1],
+    ]);
+    expect(regionsOffsets).toEqual(expectedOffsets);
 
     // Check sorted node IDs:
     const sortedNodeIDs = quadTree.getNodesInRegions().slice(nodes.length);

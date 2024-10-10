@@ -9,6 +9,16 @@ interface Test {
   gl: WebGL2RenderingContext;
 }
 
+interface Options {
+  shuffle: boolean;
+  attributesPerItem: number;
+}
+
+const DEFAULT_OPTIONS: Options = {
+  shuffle: false,
+  attributesPerItem: 1,
+};
+
 function getArrays(length: number, doShuffle?: boolean) {
   let sortOn: number[] = [];
   let expectedOutput: number[] = [];
@@ -36,7 +46,7 @@ afterEach<Test>(async ({ canvas }) => {
 });
 
 describe("Bitonic Sort GPU Program", () => {
-  type TestSpec = [string, number] | [string, number, boolean];
+  type TestSpec = [string, number] | [string, number, Partial<Options>];
   const tests: TestSpec[] = [
     ["it should properly sort the data, with a power of 4 (ideal case)", 16],
     ["it should properly sort the data, with a perfect square (ideal case for the GPU)", 25],
@@ -45,16 +55,22 @@ describe("Bitonic Sort GPU Program", () => {
     ["it should properly sort the data, with an arbitrary larger number of items (non-ideal case)", 1000],
 
     ...range(10, 30).map(
-      (i) => [`it should properly sort the data, with an array of ${i} shuffled items`, i, true] as TestSpec,
+      (i) =>
+        [`it should properly sort the data, with an array of ${i} shuffled items`, i, { shuffle: true }] as TestSpec,
+    ),
+
+    ...range(2, 3).map(
+      (i) => [`it should work properly with an attributesPerItem of ${i}`, 16, { attributesPerItem: i }] as TestSpec,
     ),
   ];
 
-  tests.forEach(([message, count, shuffle]) => {
+  tests.forEach(([message, count, opts]) => {
     test<Test>(message, async ({ gl }) => {
+      const options: Options = { ...DEFAULT_OPTIONS, ...(opts || {}) };
       const length = count;
 
-      const { sortOn, expectedOutput } = getArrays(length, shuffle);
-      const bitonicSort = new BitonicSortGPU(gl, { valuesCount: length });
+      const { sortOn, expectedOutput } = getArrays(length, options.shuffle);
+      const bitonicSort = new BitonicSortGPU(gl, { valuesCount: length, attributesPerItem: options.attributesPerItem });
 
       bitonicSort.setData(sortOn, Math.max(...sortOn) * 2);
       await bitonicSort.sort();

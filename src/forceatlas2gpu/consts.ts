@@ -1,17 +1,3 @@
-export const DATA_TEXTURES_LEVELS: Record<number, number> = {
-  1: WebGL2RenderingContext.R32F,
-  2: WebGL2RenderingContext.RG32F,
-  3: WebGL2RenderingContext.RGB32F,
-  4: WebGL2RenderingContext.RGBA32F,
-};
-
-export const DATA_TEXTURES_FORMATS: Record<number, number> = {
-  1: WebGL2RenderingContext.RED,
-  2: WebGL2RenderingContext.RG,
-  3: WebGL2RenderingContext.RGB,
-  4: WebGL2RenderingContext.RGBA,
-};
-
 export type ForceAtlas2Flags = {
   linLogMode: boolean;
   adjustSizes: boolean;
