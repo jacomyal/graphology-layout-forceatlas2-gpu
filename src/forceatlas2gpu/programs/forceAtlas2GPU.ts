@@ -129,7 +129,7 @@ export class ForceAtlas2GPU {
       ],
     });
 
-    this.quadTree = new QuadTreeGPU(this.gl, { nodesCount: graph.order }, { depth: 4 });
+    this.quadTree = new QuadTreeGPU(this.gl, { nodesCount: graph.order }, { depth: this.params.quadTreeDepth });
 
     this.fa2Program.dataTexturesIndex.nodesRegions.texture = this.quadTree.getNodesRegionsTexture();
     this.fa2Program.dataTexturesIndex.regionsBarycenters.texture = this.quadTree.getRegionsBarycentersTexture();
