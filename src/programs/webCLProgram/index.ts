@@ -14,11 +14,13 @@ export const DATA_TEXTURES_FORMATS: Record<number, number> = {
   4: WebGL2RenderingContext.RGBA,
 };
 
-export class Index<
+export class WebCLProgram<
   DATA_TEXTURE extends string = string,
   OUTPUT_TEXTURE extends string = string,
   UNIFORM extends string = string,
 > {
+  public name: string;
+
   public program: WebGLProgram;
   public gl: WebGL2RenderingContext;
   public size: number;
@@ -51,6 +53,7 @@ export class Index<
     outputTextures,
     fragmentShaderSource,
     vertexShaderSource,
+    name,
   }: {
     gl: WebGL2RenderingContext;
     fragments: number;
@@ -58,8 +61,12 @@ export class Index<
     outputTextures: { name: OUTPUT_TEXTURE; attributesPerItem: number }[];
     fragmentShaderSource: string;
     vertexShaderSource: string;
+    name: string;
   }) {
+    console.log({ name, fragmentShaderSource });
+
     this.gl = gl;
+    this.name = name;
     this.size = getTextureSize(fragments);
     this.fragments = fragments;
     this.dataTextures = dataTextures.map((spec, index) => ({
@@ -312,7 +319,7 @@ export class Index<
     this.outputTexturesIndex = {} as typeof this.outputTexturesIndex;
   }
 
-  public static wirePrograms(programs: Record<string, Index>): void {
+  public static wirePrograms(programs: Record<string, WebCLProgram>): void {
     const outputTextures: Record<string, { texture: WebGLTexture; items: number; name: string }> = {};
     const inputTextures: Record<string, { texture: WebGLTexture; items: number; name: string }> = {};
 

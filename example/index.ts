@@ -67,7 +67,8 @@ async function init() {
 
   (document.querySelector(".overlay ul") as HTMLUListElement).innerHTML = map(
     params,
-    (v: number, k) => `<li><strong>${k}:</strong> ${NUMBER_KEYS_SET.has(k) ? v.toLocaleString("en-US") : v}</li>`,
+    (v: number, k: string) =>
+      `<li><strong>${k}:</strong> ${NUMBER_KEYS_SET.has(k) ? v.toLocaleString("en-US") : v}</li>`,
   ).join("\n");
 
   window.addEventListener("hashchange", () => {

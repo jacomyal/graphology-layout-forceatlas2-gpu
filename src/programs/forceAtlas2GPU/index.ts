@@ -4,7 +4,7 @@ import { EdgeDisplayData, NodeDisplayData } from "sigma/types";
 import { getRegionsCount } from "../../utils/quadtree";
 import { getTextureSize, waitForGPUCompletion } from "../../utils/webgl";
 import { QuadTreeGPU } from "../quadTreeGPU";
-import { Index } from "../webCLProgram";
+import { WebCLProgram } from "../webCLProgram";
 import { getVertexShader } from "../webCLProgram/vertex";
 import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Cursors, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
 import { getForceAtlas2FragmentShader } from "./fragment";
@@ -51,7 +51,7 @@ export class ForceAtlas2GPU {
   private edgesArray: Float32Array = new Float32Array();
 
   // Programs:
-  private fa2Program: Index<
+  private fa2Program: WebCLProgram<
     | "nodesPosition"
     | "nodesMovement"
     | "nodesMetadata"
@@ -97,8 +97,9 @@ export class ForceAtlas2GPU {
 
     // Initialize programs:
     const regionsCount = getRegionsCount(this.params.quadTreeDepth);
-    this.fa2Program = new Index({
+    this.fa2Program = new WebCLProgram({
       gl,
+      name: "ForceAtlas2",
       fragments: this.graph.order,
       fragmentShaderSource: getForceAtlas2FragmentShader({
         ...this.params,
