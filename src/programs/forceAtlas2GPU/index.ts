@@ -2,7 +2,7 @@ import Graph from "graphology";
 import { EdgeDisplayData, NodeDisplayData } from "sigma/types";
 
 import { getRegionsCount } from "../../utils/quadtree";
-import { getTextureSize, waitForGPUCompletion } from "../../utils/webgl";
+import { getTextureSize } from "../../utils/webgl";
 import { QuadTreeGPU } from "../quadTreeGPU";
 import { WebCLProgram } from "../webCLProgram";
 import { getVertexShader } from "../webCLProgram/vertex";

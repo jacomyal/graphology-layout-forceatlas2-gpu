@@ -1,22 +1,14 @@
 import Graph from "graphology";
-import clusters from "graphology-generators/random/clusters";
-import random from "graphology-layout/random";
+import { cropToLargestConnectedComponent } from "graphology-components";
+import circular from "graphology-layout/circular";
 import { isNil, isNumber, map, mapValues } from "lodash";
 import Sigma from "sigma";
 
 import { ForceAtlas2GPU, ForceAtlas2Graph } from "../src";
-import { countSigmaRPS } from "./sigmaRPSCounter";
+import data from "./public/eurosis.json";
+import { countSyncsPerSecond } from "./sigmaRPSCounter";
 
-const NUMBER_KEYS = [
-  "order",
-  "size",
-  "clusters",
-  "iterationsPerStep",
-  "gravity",
-  "scalingRatio",
-  "quadTreeDepth",
-  "quadTreeTheta",
-] as const;
+const NUMBER_KEYS = ["iterationsPerStep", "gravity", "scalingRatio", "quadTreeDepth", "quadTreeTheta"] as const;
 const NUMBER_KEYS_SET = new Set<string>(NUMBER_KEYS);
 type NumberKey = (typeof NUMBER_KEYS)[number];
 
@@ -31,11 +23,6 @@ const BOOLEAN_KEYS_SET = new Set<string>(BOOLEAN_KEYS);
 type BooleanKey = (typeof BOOLEAN_KEYS)[number];
 
 const DEFAULT_PARAMS: Record<NumberKey, number> & Record<BooleanKey, boolean> = {
-  // Graph params:
-  order: 1000,
-  size: 5000,
-  clusters: 3,
-
   // FA2 params:
   iterationsPerStep: 10,
   gravity: 0.02,
@@ -75,29 +62,20 @@ async function init() {
     window.location.reload();
   });
 
-  const graph = clusters(Graph, params);
-  random.assign(graph, {
+  const graph = Graph.from(data);
+
+  cropToLargestConnectedComponent(graph);
+
+  circular.assign(graph, {
     scale: 1000,
     center: 0,
-  });
-  const colors: Record<string, string> = {};
-  for (let i = 0; i < params.clusters; i++) {
-    colors[i] = "#" + Math.floor(Math.random() * 16777215).toString(16);
-  }
-  let i = 0;
-  graph.forEachNode((node, { cluster }) => {
-    graph.mergeNodeAttributes(node, {
-      size: graph.degree(node) / 3,
-      label: `Node n°${++i}, in cluster n°${cluster}`,
-      color: colors[cluster + ""],
-    });
   });
 
   const container = document.getElementById("stage") as HTMLDivElement;
   const fa2 = new ForceAtlas2GPU(graph as ForceAtlas2Graph, {
     ...params,
   });
-  const sigma = new Sigma(graph, container, {
+  new Sigma(graph, container, {
     itemSizesReference: "positions",
     zoomToSizeRatioFunction: (x) => x,
   });
@@ -105,7 +83,7 @@ async function init() {
   fa2.start(1000);
 
   // Add RPS counter:
-  const counter = countSigmaRPS(sigma);
+  const counter = countSyncsPerSecond(graph);
   if (counter.dom) document.body.append(counter.dom);
 
   // Add toggle button:

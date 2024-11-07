@@ -1,6 +1,6 @@
-import Sigma from "sigma";
+import Graph from "graphology";
 
-export function countSigmaRPS(sigma: Sigma) {
+export function countSyncsPerSecond(graph: Graph) {
   let isKilled = false;
   let isPaused = false;
   let t0 = Date.now();
@@ -10,16 +10,17 @@ export function countSigmaRPS(sigma: Sigma) {
     if (isKilled) return;
     renders++;
   };
-  sigma.on("afterRender", onRender);
+  graph.on("eachNodeAttributesUpdated", onRender);
 
   const refreshDisplay = () => {
     const rps = (renders / (Date.now() - t0)) * 1000;
-    dom.innerHTML = (isPaused || isNaN(rps) ? "-" : rps.toLocaleString("en-US", { maximumFractionDigits: 2 })) + " RPS";
+    dom.innerHTML =
+      (isPaused || isNaN(rps) ? "-" : rps.toLocaleString("en-US", { maximumFractionDigits: 3 })) + " syncs/second";
   };
 
   const dom = document.createElement("div") as HTMLDivElement;
   dom.classList.add("rps-counter");
-  dom.innerHTML = "- RPS";
+  dom.innerHTML = "- syncs/second";
   const intervalID = setInterval(refreshDisplay, 1000);
 
   const res: { dom: HTMLElement | null; reset: () => void; pause: () => void; clean: () => void } = {
@@ -36,7 +37,7 @@ export function countSigmaRPS(sigma: Sigma) {
     },
     clean: () => {
       if (isKilled) return;
-      sigma.off("afterRender", onRender);
+      graph.off("eachNodeAttributesUpdated", onRender);
       clearInterval(intervalID);
       dom.remove();
       res.dom = null;
