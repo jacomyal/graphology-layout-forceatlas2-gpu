@@ -212,15 +212,16 @@ export class ForceAtlas2GPU {
     this.fa2Program.activate();
     const nodesPosition = this.fa2Program.getOutput("nodesPosition");
 
-    graph.forEachNode((n) => {
-      const { index } = this.nodeDataCache[n];
+    graph.updateEachNodeAttributes((node, attributes) => {
+      const { index } = this.nodeDataCache[node];
       const x = nodesPosition[ATTRIBUTES_PER_ITEM.nodesPosition * index];
       const y = nodesPosition[ATTRIBUTES_PER_ITEM.nodesPosition * index + 1];
 
-      graph.mergeNodeAttributes(n, {
+      return {
+        ...attributes,
         x,
         y,
-      });
+      };
     });
   }
 
@@ -265,11 +266,10 @@ export class ForceAtlas2GPU {
       if (remainingIterations > 0) this.swapFA2Textures();
     }
 
-    await waitForGPUCompletion(this.gl);
     this.updateGraph();
     this.swapFA2Textures();
 
-    if (this.remainingSteps--) this.animationFrameID = window.setTimeout(() => this.step(), 0);
+    if (this.remainingSteps--) this.animationFrameID = requestIdleCallback(() => this.step());
   }
 
   /**
@@ -292,7 +292,7 @@ export class ForceAtlas2GPU {
 
   public stop() {
     if (this.animationFrameID) {
-      window.clearTimeout(this.animationFrameID);
+      window.cancelIdleCallback(this.animationFrameID);
       this.animationFrameID = null;
     }
     this.running = false;

@@ -43,6 +43,7 @@ export class WebCLProgram<
     attributesPerItem: number;
     index: number;
     texture: WebGLTexture;
+    isAllocated: boolean;
   }[];
   public outputTexturesIndex: Record<OUTPUT_TEXTURE, (typeof this.outputTextures)[number]>;
 
@@ -82,6 +83,7 @@ export class WebCLProgram<
       ...spec,
       index,
       texture: gl.createTexture() as WebGLTexture,
+      isAllocated: false,
     }));
     this.outputTexturesIndex = this.outputTextures.reduce(
       (iter, spec) => ({ ...iter, [spec.name]: spec }),
@@ -137,33 +139,36 @@ export class WebCLProgram<
     dataTextures.forEach(({ name, texture, index }) => {
       gl.activeTexture(gl.TEXTURE0 + index);
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.uniform1i(gl.getUniformLocation(program, `u_${name}Texture`), index);
     });
 
     // Handle output:
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.outputBuffer);
-    outputTextures.forEach(({ texture, index, attributesPerItem }) => {
+    outputTextures.forEach((outputTexture) => {
+      const { texture, index, attributesPerItem, isAllocated } = outputTexture;
       gl.activeTexture(gl.TEXTURE0 + dataTextures.length + index);
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        DATA_TEXTURES_LEVELS[attributesPerItem],
-        size,
-        size,
-        0,
-        DATA_TEXTURES_FORMATS[attributesPerItem],
-        gl.FLOAT,
-        null,
-      );
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+      if (!isAllocated) {
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          DATA_TEXTURES_LEVELS[attributesPerItem],
+          size,
+          size,
+          0,
+          DATA_TEXTURES_FORMATS[attributesPerItem],
+          gl.FLOAT,
+          null,
+        );
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        outputTexture.isAllocated = true;
+      }
+
       gl.framebufferTexture2D(
         gl.FRAMEBUFFER,
         gl[`COLOR_ATTACHMENT${index}` as "COLOR_ATTACHMENT0"],
@@ -172,6 +177,7 @@ export class WebCLProgram<
         0,
       );
     });
+
     gl.drawBuffers(this.outputTextures.map((_, i) => gl[`COLOR_ATTACHMENT${i}` as "COLOR_ATTACHMENT0"]));
   }
 
@@ -201,6 +207,10 @@ export class WebCLProgram<
 
     gl.activeTexture(gl.TEXTURE0 + index);
     gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texImage2D(
       gl.TEXTURE_2D,
       0,
@@ -226,9 +236,11 @@ export class WebCLProgram<
   }
 
   public swapTextures(input: DATA_TEXTURE, output: OUTPUT_TEXTURE) {
-    [this.dataTexturesIndex[input].texture, this.outputTexturesIndex[output].texture] = [
-      this.outputTexturesIndex[output].texture,
-      this.dataTexturesIndex[input].texture,
+    const { gl, dataTexturesIndex, outputTexturesIndex } = this;
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    [dataTexturesIndex[input].texture, outputTexturesIndex[output].texture] = [
+      outputTexturesIndex[output].texture,
+      dataTexturesIndex[input].texture,
     ];
   }
 
@@ -267,6 +279,7 @@ export class WebCLProgram<
     const outputArr = new Float32Array(size * size * attributesPerItem); // Assuming RGBA float data
 
     // Read the pixels from the framebuffer
+    gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
     gl.readPixels(0, 0, size, size, DATA_TEXTURES_FORMATS[attributesPerItem], gl.FLOAT, outputArr);
 
     // Unbind the framebuffer
