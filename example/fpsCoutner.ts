@@ -1,6 +1,8 @@
 import Graph from "graphology";
 
-export function countSyncsPerSecond(graph: Graph) {
+const UNIT = "fa2/second";
+
+export function countStepsPerSecond(graph: Graph, stepsPerSync: number = 1) {
   let isKilled = false;
   let isPaused = false;
   let t0 = Date.now();
@@ -13,14 +15,14 @@ export function countSyncsPerSecond(graph: Graph) {
   graph.on("eachNodeAttributesUpdated", onRender);
 
   const refreshDisplay = () => {
-    const rps = (renders / (Date.now() - t0)) * 1000;
+    const rps = (renders / (Date.now() - t0)) * 1000 * stepsPerSync;
     dom.innerHTML =
-      (isPaused || isNaN(rps) ? "-" : rps.toLocaleString("en-US", { maximumFractionDigits: 3 })) + " syncs/second";
+      (isPaused || isNaN(rps) ? "-" : rps.toLocaleString("en-US", { maximumFractionDigits: 1 })) + " " + UNIT;
   };
 
   const dom = document.createElement("div") as HTMLDivElement;
   dom.classList.add("rps-counter");
-  dom.innerHTML = "- syncs/second";
+  dom.innerHTML = `- ${UNIT}`;
   const intervalID = setInterval(refreshDisplay, 1000);
 
   const res: { dom: HTMLElement | null; reset: () => void; pause: () => void; clean: () => void } = {

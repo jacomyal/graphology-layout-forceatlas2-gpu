@@ -10,7 +10,7 @@ import Sigma from "sigma";
 import { ForceAtlas2GPU, ForceAtlas2Graph } from "../src";
 import { getClustersGraph } from "./getClustersGraph";
 import data from "./public/eurosis.json";
-import { countSyncsPerSecond } from "./sigmaRPSCounter";
+import { countStepsPerSecond } from "./fpsCoutner";
 
 const NUMBER_KEYS = [
   "iterationsPerStep",
@@ -142,7 +142,7 @@ async function init() {
   // fa2.start();
 
   // Add RPS counter:
-  const counter = countSyncsPerSecond(graph);
+  const counter = countStepsPerSecond(graph, params.useFA2GPU ? params.iterationsPerStep : 1);
   if (counter.dom) document.body.append(counter.dom);
 
   // Add toggle button:
