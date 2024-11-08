@@ -14,9 +14,9 @@ const ATTRIBUTES_PER_ITEM = {
   nodesPosition: 4,
   nodesRegionsIDs: 4,
   regionsBarycenters: 4,
-  regionsOffsets: 4,
-  values: 4,
-  sortOn: 4,
+  regionsOffsets: 2,
+  values: 1,
+  sortOn: 1,
 } as const;
 
 export type QuadTreeGPUSettings = {

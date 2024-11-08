@@ -298,7 +298,7 @@ export class ForceAtlas2GPU {
    * Public API:
    * ***********
    */
-  public start(steps = 1) {
+  public start(steps = -1) {
     this.readGraph();
 
     this.remainingSteps = steps;

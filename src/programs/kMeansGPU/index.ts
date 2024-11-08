@@ -7,7 +7,7 @@ import { getCentroidInitialPositionFragmentShader } from "./fragment-initial-cen
 const ATTRIBUTES_PER_ITEM = {
   nodesPosition: 4,
   centroidsPosition: 4,
-  closestCentroid: 4,
+  closestCentroid: 1,
 } as const;
 
 export class KMeansGPU {
