@@ -3,7 +3,7 @@ import louvain from "graphology-communities-louvain";
 import { cropToLargestConnectedComponent } from "graphology-components";
 import { circlepack } from "graphology-layout";
 import FA2LayoutSupervisor from "graphology-layout-forceatlas2/worker";
-import circular from "graphology-layout/circular";
+import { SerializedGraph } from "graphology-types";
 import { isNil, isNumber, map, mapValues } from "lodash";
 import Sigma from "sigma";
 
@@ -43,7 +43,7 @@ type BooleanKey = (typeof BOOLEAN_KEYS)[number];
 
 const DEFAULT_PARAMS: Record<NumberKey, number> & Record<BooleanKey, boolean> = {
   // FA2 params:
-  iterationsPerStep: 100,
+  iterationsPerStep: 10,
   gravity: 0.02,
   scalingRatio: 10,
   strongGravityMode: false,
@@ -92,7 +92,7 @@ async function init() {
 
   let graph: Graph;
   if (params.useEuroSIS) {
-    graph = Graph.from(data);
+    graph = Graph.from(data as SerializedGraph);
   } else {
     graph = getClustersGraph(params.graphOrder, params.graphSize, params.graphClusters, params.graphClusterDensity);
   }
@@ -113,7 +113,7 @@ async function init() {
   if (params.useFA2GPU) {
     fa2 = new ForceAtlas2GPU(graph as ForceAtlas2Graph, {
       ...params,
-      iterationsPerStep: 5,
+      iterationsPerStep: params.iterationsPerStep,
       repulsion: params.enableKMeans
         ? {
             type: "k-means",
