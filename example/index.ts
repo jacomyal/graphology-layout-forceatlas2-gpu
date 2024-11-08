@@ -8,9 +8,9 @@ import { isNil, isNumber, map, mapValues } from "lodash";
 import Sigma from "sigma";
 
 import { ForceAtlas2GPU, ForceAtlas2Graph } from "../src";
+import { countStepsPerSecond } from "./fpsCounter";
 import { getClustersGraph } from "./getClustersGraph";
 import data from "./public/eurosis.json";
-import { countStepsPerSecond } from "./fpsCoutner";
 
 const NUMBER_KEYS = [
   "iterationsPerStep",
