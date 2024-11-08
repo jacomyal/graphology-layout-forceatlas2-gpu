@@ -1,42 +1,30 @@
-export type ForceAtlas2Flags = {
+export type ForceAtlas2Settings = {
   linLogMode: boolean;
   adjustSizes: boolean;
   strongGravityMode: boolean;
   outboundAttractionDistribution: boolean;
-  enableQuadTree: boolean;
-};
-export type ForceAtlas2Cursors = {
+  repulsion:
+    | { type: "all-pairs" }
+    | { type: "quad-tree"; depth: number; theta: number }
+    | { type: "k-means"; steps: number; centroids: number };
   edgeWeightInfluence: number;
   scalingRatio: number;
   gravity: number;
   slowDown: number;
   maxForce: number;
   iterationsPerStep: number;
-  quadTreeDepth: number;
-  quadTreeTheta: number;
 };
-export type ForceAtlas2Settings = ForceAtlas2Flags & ForceAtlas2Cursors;
 
-export const DEFAULT_FORCE_ATLAS_2_FLAGS: ForceAtlas2Flags = {
+export const DEFAULT_FORCE_ATLAS_2_SETTINGS: ForceAtlas2Settings = {
   linLogMode: false,
   adjustSizes: false,
   strongGravityMode: false,
   outboundAttractionDistribution: false,
-  enableQuadTree: false,
-};
-export const DEFAULT_FORCE_ATLAS_2_CURSORS: ForceAtlas2Cursors = {
+  repulsion: { type: "all-pairs" },
   edgeWeightInfluence: 1,
   scalingRatio: 1,
   gravity: 1,
   slowDown: 1,
   maxForce: 10,
   iterationsPerStep: 10,
-  quadTreeDepth: 3,
-  quadTreeTheta: 0.5,
 };
-export const DEFAULT_FORCE_ATLAS_2_SETTINGS = {
-  ...DEFAULT_FORCE_ATLAS_2_FLAGS,
-  ...DEFAULT_FORCE_ATLAS_2_CURSORS,
-};
-
-export const UNIFORM_SETTINGS = Object.keys(DEFAULT_FORCE_ATLAS_2_CURSORS) as (keyof ForceAtlas2Cursors)[];

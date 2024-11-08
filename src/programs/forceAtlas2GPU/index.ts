@@ -3,10 +3,11 @@ import { EdgeDisplayData, NodeDisplayData } from "sigma/types";
 
 import { getRegionsCount } from "../../utils/quadtree";
 import { getTextureSize } from "../../utils/webgl";
+import { KMeansGPU } from "../kMeansGPU";
 import { QuadTreeGPU } from "../quadTreeGPU";
 import { WebCLProgram } from "../webCLProgram";
 import { getVertexShader } from "../webCLProgram/vertex";
-import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Cursors, ForceAtlas2Settings, UNIFORM_SETTINGS } from "./consts";
+import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Settings } from "./consts";
 import { getForceAtlas2FragmentShader } from "./fragment";
 
 const ATTRIBUTES_PER_ITEM = {
@@ -19,6 +20,7 @@ const ATTRIBUTES_PER_ITEM = {
   regionsOffsets: 2,
   nodesInRegions: 1,
   boundaries: 4,
+  centroidsPosition: 4,
 } as const;
 
 export type ForceAtlas2Graph = Graph<NodeDisplayData, EdgeDisplayData & { weight?: number }>;
@@ -60,10 +62,12 @@ export class ForceAtlas2GPU {
     | "regionsBarycenters"
     | "regionsOffsets"
     | "nodesInRegions"
-    | "boundaries",
+    | "boundaries"
+    | "centroidsPosition",
     "nodesPosition" | "nodesMovement"
   >;
   private quadTree: QuadTreeGPU;
+  private kMeans: KMeansGPU;
 
   constructor(graph: ForceAtlas2Graph, params: Partial<ForceAtlas2Settings> = {}) {
     // Initialize data:
@@ -74,9 +78,12 @@ export class ForceAtlas2GPU {
     };
     this.nodeDataCache = {};
 
-    if (this.params.enableQuadTree) {
-      if (this.params.quadTreeDepth < 1 || this.params.quadTreeDepth > 4)
-        throw new Error("quadTreeDepth must be 1, 2, 3 or 4");
+    const { repulsion } = this.params;
+    if (repulsion.type === "quad-tree") {
+      if (repulsion.depth < 1 || repulsion.depth > 4) throw new Error("Quad-tree depth must be 1, 2, 3 or 4");
+    } else if (repulsion.type === "k-means") {
+      if (repulsion.centroids < 1) throw new Error("K-means must have at least 1 centroid");
+      if (repulsion.steps < 1) throw new Error("K-means must have at least 1 step");
     }
 
     this.readGraph();
@@ -96,7 +103,9 @@ export class ForceAtlas2GPU {
     }
 
     // Initialize programs:
-    const regionsCount = getRegionsCount(this.params.quadTreeDepth);
+    const quadTreeDepth = repulsion.type === "quad-tree" ? repulsion.depth : 1;
+    const quadTreeRegionsCount = repulsion.type === "quad-tree" ? getRegionsCount(repulsion.depth) : 1;
+    const kMeansCentroidsCount = repulsion.type === "k-means" ? repulsion.centroids : 1;
     this.fa2Program = new WebCLProgram({
       gl,
       name: "ForceAtlas2",
@@ -111,12 +120,18 @@ export class ForceAtlas2GPU {
         { name: "nodesMovement", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMovement, items: graph.order },
         { name: "nodesMetadata", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMetadata, items: graph.order },
         { name: "edges", attributesPerItem: ATTRIBUTES_PER_ITEM.edges, items: graph.size },
-        // Quad-tree data textures:
+        // Quad-tree:
         { name: "nodesRegions", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesRegions, items: graph.order },
-        { name: "regionsBarycenters", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsBarycenters, items: regionsCount },
-        { name: "regionsOffsets", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsOffsets, items: regionsCount },
+        {
+          name: "regionsBarycenters",
+          attributesPerItem: ATTRIBUTES_PER_ITEM.regionsBarycenters,
+          items: quadTreeRegionsCount,
+        },
+        { name: "regionsOffsets", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsOffsets, items: quadTreeRegionsCount },
         { name: "nodesInRegions", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesInRegions, items: graph.order },
         { name: "boundaries", attributesPerItem: ATTRIBUTES_PER_ITEM.boundaries, items: 1 },
+        // K-means:
+        { name: "centroidsPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.boundaries, items: kMeansCentroidsCount },
       ],
       outputTextures: [
         { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition },
@@ -124,13 +139,19 @@ export class ForceAtlas2GPU {
       ],
     });
 
-    this.quadTree = new QuadTreeGPU(this.gl, { nodesCount: graph.order }, { depth: this.params.quadTreeDepth });
+    this.quadTree = new QuadTreeGPU(this.gl, { nodesCount: graph.order }, { depth: quadTreeDepth });
+    this.kMeans = new KMeansGPU(this.gl, {
+      nodesCount: graph.order,
+      centroidsCount: kMeansCentroidsCount,
+    });
 
     this.fa2Program.dataTexturesIndex.nodesRegions.texture = this.quadTree.getNodesRegionsTexture();
     this.fa2Program.dataTexturesIndex.regionsBarycenters.texture = this.quadTree.getRegionsBarycentersTexture();
     this.fa2Program.dataTexturesIndex.regionsOffsets.texture = this.quadTree.getRegionsOffsetsTexture();
     this.fa2Program.dataTexturesIndex.nodesInRegions.texture = this.quadTree.getNodesInRegionsTexture();
     this.fa2Program.dataTexturesIndex.boundaries.texture = this.quadTree.getBoundariesTexture();
+
+    this.fa2Program.dataTexturesIndex.centroidsPosition.texture = this.kMeans.getCentroidsPosition();
   }
 
   private readGraph() {
@@ -232,8 +253,8 @@ export class ForceAtlas2GPU {
   }
 
   private async step() {
-    const { quadTree, fa2Program, params } = this;
-    const { iterationsPerStep } = params;
+    const { quadTree, kMeans, fa2Program, params } = this;
+    const { iterationsPerStep, repulsion } = params;
 
     let remainingIterations = iterationsPerStep;
 
@@ -243,23 +264,24 @@ export class ForceAtlas2GPU {
         return;
       }
 
-      const cursors: Partial<ForceAtlas2Cursors> = {};
-      UNIFORM_SETTINGS.forEach((setting) => {
-        cursors[setting] = params[setting];
-      });
-      const fa2Uniforms = {
-        ...cursors,
-        outboundAttCompensation: this.outboundAttCompensation,
-      };
-
       // Compute quad-tree if needed:
-      if (params.enableQuadTree) {
+      if (repulsion.type === "quad-tree") {
         quadTree.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
         await quadTree.compute();
         fa2Program.activate();
+      } else if (repulsion.type === "k-means") {
+        kMeans.compute({ steps: repulsion.steps });
+        fa2Program.activate();
       }
 
-      fa2Program.setUniforms(fa2Uniforms);
+      fa2Program.setUniforms({
+        edgeWeightInfluence: params.edgeWeightInfluence,
+        scalingRatio: params.scalingRatio,
+        gravity: params.gravity,
+        maxForce: params.maxForce,
+        slowDown: params.slowDown,
+        outboundAttCompensation: this.outboundAttCompensation,
+      });
       fa2Program.prepare();
       fa2Program.compute();
 
@@ -285,6 +307,10 @@ export class ForceAtlas2GPU {
     this.fa2Program.setTextureData("nodesMovement", this.nodesMovementArray, this.graph.order);
     this.fa2Program.setTextureData("nodesMetadata", this.nodesMetadataArray, this.graph.order);
     this.fa2Program.setTextureData("edges", this.edgesArray, this.graph.size * 2);
+
+    if (this.params.repulsion.type === "k-means") {
+      this.kMeans.initialize();
+    }
 
     this.fa2Program.activate();
     this.step();

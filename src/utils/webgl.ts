@@ -65,13 +65,7 @@ vec4 getValueInTexture(sampler2D inputTexture, float index, float textureSize) {
   float row = floor(index / textureSize);
   float col = index - row * textureSize;
 
-  return texture(
-    inputTexture,
-    vec2(
-      (col + 0.5) / textureSize,
-      (row + 0.5) / textureSize
-    )
-  );
+  return texelFetch(inputTexture, ivec2(int(col), int(row)), 0);
 }
 `;
 
