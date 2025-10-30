@@ -2,29 +2,84 @@
   <body>
     <style>
       html,
-      body,
-      #stage {
+      body {
+        font-family: sans-serif;
+        font-size: 0.9em;
         width: 100%;
         height: 100%;
         margin: 0;
         padding: 0;
-        overflow: hidden;
-        font-family: sans-serif;
+        display: flex;
+        align-items: stretch;
+      }
+      #stage {
+        background: #eeeeee;
+        flex-grow: 1;
+      }
+      #controls {
+        padding: 15px;
+        background: #ffffff;
+        overflow-y: auto;
+        width: 400px;
+        max-width: 100%;
+      }
+      #controls form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      #controls h3 {
+        margin: 0 0 10px 0;
+        font-size: 1.1em;
+      }
+      .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .form-group label {
+        font-weight: 600;
         font-size: 0.9em;
       }
-      .overlay {
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        padding: 10px;
-        background: #ffffff99;
+      .form-group input[type="number"],
+      .form-group select {
+        padding: 4px 6px;
+        border: 1px solid #ccc;
+        border-radius: 3px;
       }
-      .overlay ul {
+      .form-group input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+      }
+      .form-group.checkbox {
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+      }
+      .form-group.checkbox label {
         margin: 0;
-        padding: 0;
       }
-      canvas.sigma-mouse {
-        z-index: 1;
+      .form-group.hidden {
+        display: none;
+      }
+      .form-section {
+        border-top: 1px solid #ddd;
+        padding-top: 12px;
+        margin-top: 4px;
+      }
+      button[type="submit"] {
+        position: static;
+        margin: 10px 0 0 0;
+        padding: 8px 12px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button[type="submit"]:hover {
+        background: #0056b3;
       }
       .rps-counter {
         position: absolute;
@@ -44,11 +99,12 @@
         z-index: 2;
       }
     </style>
-    <div id="stage"></div>
-    <div class="overlay">
-      <ul></ul>
+    <div id="controls">
+      <h3>ForceAtlas2 Settings</h3>
+      <form id="settings-form"></form>
     </div>
-    <button>Toggle FA2</button>
+    <div id="stage"></div>
+    <button type="button" id="toggle-fa2">Toggle FA2</button>
     <script type="module" src="./example/index.ts"></script>
   </body>
 </html>
