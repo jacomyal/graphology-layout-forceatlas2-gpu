@@ -130,9 +130,10 @@ describe("Quad-tree GPU Program", () => {
     });
     const allRegionsOffsetData = quadTree.getRegionsOffsets();
     const regionsOffsets = range(0, regionsCount).map((i) => [
-      allRegionsOffsetData[i * 4],
-      allRegionsOffsetData[i * 4 + 1],
+      allRegionsOffsetData[i * 2],
+      allRegionsOffsetData[i * 2 + 1],
     ]);
+
     expect(regionsOffsets).toEqual(expectedOffsets);
 
     // Check sorted node IDs:

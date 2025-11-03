@@ -19,6 +19,39 @@ export function getTextureSize(itemsCount: number) {
   return Math.ceil(Math.sqrt(itemsCount));
 }
 
+/**
+ * Computes the next power of 2 greater than or equal to the given count.
+ *
+ * This is required for BitonicSort, which only works on arrays whose length
+ * is a power of 2. When sorting N items where N is not a power of 2, we must:
+ * 1. Extend the array to the next power of 2 (padding with "excess" values)
+ * 2. Sort all positions including excess ones
+ * 3. Only use the first N sorted values
+ *
+ * Example: 10,000 nodes → 16,384 (2^14) total positions in sorted array
+ *
+ * @param itemsCount The actual number of items to sort
+ * @returns The next power of 2 >= itemsCount
+ */
+export function getNextPowerOfTwo(itemsCount: number): number {
+  return 2 ** Math.ceil(Math.log2(itemsCount));
+}
+
+/**
+ * Computes the texture size needed to store a sorted array from BitonicSort.
+ *
+ * BitonicSort outputs arrays sized to the next power of 2, not the original
+ * item count. This function returns the texture dimensions for that output.
+ *
+ * Example: 10,000 items → 16,384 positions → 128×128 texture
+ *
+ * @param itemsCount The actual number of items being sorted
+ * @returns The texture size (width/height) for the sorted output
+ */
+export function getSortedTextureSize(itemsCount: number): number {
+  return getTextureSize(getNextPowerOfTwo(itemsCount));
+}
+
 export function numberToGLSLFloat(n: number): string {
   return n % 1 === 0 ? n.toFixed(1) : n.toString();
 }

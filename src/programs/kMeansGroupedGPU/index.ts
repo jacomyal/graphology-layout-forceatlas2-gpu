@@ -1,3 +1,4 @@
+import { getNextPowerOfTwo } from "../../utils/webgl";
 import { BitonicSortGPU } from "../bitonicSortGPU";
 import { KMeansGPU } from "../kMeansGPU";
 import { WebCLProgram } from "../webCLProgram";
@@ -46,6 +47,9 @@ export class KMeansGroupedGPU {
     this.nodesCount = nodesCount;
     this.centroidsCount = centroidsCount || Math.sqrt(nodesCount);
 
+    // BitonicSort requires power-of-2 sized arrays, so we need to extend our node count
+    const sortedArraySize = getNextPowerOfTwo(nodesCount);
+
     // Initialize base k-means clustering
     this.kMeans = new KMeansGPU(gl, {
       nodesCount,
@@ -57,7 +61,7 @@ export class KMeansGroupedGPU {
     this.setupSortProgram = new WebCLProgram({
       gl,
       name: "K-means Grouped - Prepare Bitonic sort",
-      fragments: this.nodesCount,
+      fragments: sortedArraySize,
       fragmentShaderSource: getKMeansSetupSortFragmentShader({
         nodesCount: this.nodesCount,
         centroidsCount: this.centroidsCount,

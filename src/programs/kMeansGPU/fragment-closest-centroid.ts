@@ -40,13 +40,13 @@ void main() {
   float closestCentroidID = 0.0;
   float distanceToClosestCentroid = distance(
     position,
-    getValueInTexture(u_centroidsPositionTexture, closestCentroidID, NODES_TEXTURE_SIZE).xy
+    getValueInTexture(u_centroidsPositionTexture, closestCentroidID, CENTROIDS_TEXTURE_SIZE).xy
   );
 
   for (float centroidID = 1.0; centroidID < CENTROIDS_COUNT; centroidID++) {
     float distanceToCentroid = distance(
       position,
-      getValueInTexture(u_centroidsPositionTexture, centroidID, NODES_TEXTURE_SIZE).xy
+      getValueInTexture(u_centroidsPositionTexture, centroidID, CENTROIDS_TEXTURE_SIZE).xy
     );
     
     if (distanceToCentroid < distanceToClosestCentroid) {

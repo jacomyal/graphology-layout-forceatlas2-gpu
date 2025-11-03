@@ -6,7 +6,13 @@ import {
   GLSL_getRegionsCount,
   getRegionsCount,
 } from "../../utils/quadtree";
-import { GLSL_getIndex, GLSL_getValueInTexture, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
+import {
+  GLSL_getIndex,
+  GLSL_getValueInTexture,
+  getSortedTextureSize,
+  getTextureSize,
+  numberToGLSLFloat,
+} from "../../utils/webgl";
 import { ForceAtlas2Settings } from "./consts";
 
 export function getForceAtlas2FragmentShader({
@@ -24,16 +30,13 @@ export function getForceAtlas2FragmentShader({
   const kMeansCentroids =
     repulsion.type === "k-means" || repulsion.type === "k-means-grouped" ? repulsion.centroids : 1;
 
-  // For k-means-grouped, we need the extended node count (next power of 2) for bitonicSort output texture
-  const extendedNodesCount = 2 ** Math.ceil(Math.log2(graph.order));
-
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
 precision highp float;
 
 #define NODES_COUNT ${numberToGLSLFloat(graph.order)}
 #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.order))}
-#define EXTENDED_NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(extendedNodesCount))}
+#define SORTED_TEXTURE_SIZE ${numberToGLSLFloat(getSortedTextureSize(graph.order))}
 #define EDGES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.size * 2))}
 #define QUAD_TREE_DEPTH ${Math.floor(quadTreeDepth)}
 #define QUAD_TREE_REGIONS_COUNT ${Math.floor(getRegionsCount(quadTreeDepth))}
@@ -182,7 +185,7 @@ void main() {
         float endIndex = startIndex + regionOffset.x;
 
         for (float j = startIndex; j < endIndex; j++) {
-          float otherNodeIndex = getValueInTexture(u_nodesInRegionsTexture, j, EXTENDED_NODES_TEXTURE_SIZE).x;
+          float otherNodeIndex = getValueInTexture(u_nodesInRegionsTexture, j, SORTED_TEXTURE_SIZE).x;
           vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
           vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
           float otherNodeMass = otherNodePosition.z;
@@ -265,7 +268,7 @@ void main() {
     float endIndex = startIndex + centroidOffset.x;
 
     for (float j = startIndex; j < endIndex; j++) {
-      float otherNodeIndex = getValueInTexture(u_nodesInCentroids, j, EXTENDED_NODES_TEXTURE_SIZE).x;
+      float otherNodeIndex = getValueInTexture(u_nodesInCentroids, j, SORTED_TEXTURE_SIZE).x;
       if (otherNodeIndex == nodeIndex) continue;
 
       vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);

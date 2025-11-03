@@ -1,5 +1,5 @@
 import { getRegionsCount } from "../../utils/quadtree";
-import { getTextureSize } from "../../utils/webgl";
+import { getNextPowerOfTwo, getTextureSize } from "../../utils/webgl";
 import { BitonicSortGPU } from "../bitonicSortGPU";
 import { WebCLProgram } from "../webCLProgram";
 import { getVertexShader } from "../webCLProgram/vertex";
@@ -53,6 +53,9 @@ export class QuadTreeGPU {
     this.nodesCount = nodesCount;
     this.params = { ...DEFAULT_QUAD_TREE_GPU_SETTINGS, ...params };
     const regionsCount = getRegionsCount(this.params.depth);
+
+    // BitonicSort requires power-of-2 sized arrays, so we need to extend our node count
+    const sortedArraySize = getNextPowerOfTwo(nodesCount);
 
     // Initialize programs:
     this.boundariesProgram = new WebCLProgram({
@@ -118,7 +121,7 @@ export class QuadTreeGPU {
     this.setupSortProgram = new WebCLProgram({
       gl,
       name: "QuadTree - Prepare Bitonic sort",
-      fragments: regionsCount,
+      fragments: sortedArraySize,
       fragmentShaderSource: getQuadTreeSetupSortFragmentShader({
         nodesCount,
         depth: this.params.depth,
@@ -133,7 +136,7 @@ export class QuadTreeGPU {
       ],
     });
 
-    this.bitonicSort = new BitonicSortGPU(gl, { valuesCount: nodesCount, attributesPerItem: 4 });
+    this.bitonicSort = new BitonicSortGPU(gl, { valuesCount: nodesCount, attributesPerItem: 1 });
 
     // Initial data textures rebind:
     this.wireTextures(nodesTexture);

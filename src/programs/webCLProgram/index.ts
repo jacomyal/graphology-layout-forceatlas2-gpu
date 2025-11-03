@@ -64,8 +64,6 @@ export class WebCLProgram<
     vertexShaderSource: string;
     name: string;
   }) {
-    console.log({ name, fragmentShaderSource });
-
     this.gl = gl;
     this.name = name;
     this.size = getTextureSize(fragments);

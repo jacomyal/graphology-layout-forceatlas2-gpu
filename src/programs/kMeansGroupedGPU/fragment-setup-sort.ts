@@ -1,4 +1,10 @@
-import { GLSL_getIndex, GLSL_getValueInTexture, getTextureSize, numberToGLSLFloat } from "../../utils/webgl";
+import {
+  GLSL_getIndex,
+  GLSL_getValueInTexture,
+  getSortedTextureSize,
+  getTextureSize,
+  numberToGLSLFloat,
+} from "../../utils/webgl";
 
 /**
  * This shader is executed for each node, and returns on a texture its index,
@@ -18,6 +24,7 @@ precision highp float;
 #define VALUE_FOR_EXCESS_NODE ${numberToGLSLFloat(centroidsCount + 1)}
 #define NODES_COUNT ${numberToGLSLFloat(nodesCount)}
 #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(nodesCount))}
+#define SORTED_TEXTURE_SIZE ${numberToGLSLFloat(getSortedTextureSize(nodesCount))}
 
 // Graph data:
 uniform sampler2D u_closestCentroidTexture;
@@ -32,7 +39,7 @@ ${GLSL_getValueInTexture}
 ${GLSL_getIndex}
 
 void main() {
-  float nodeIndex = getIndex(v_textureCoord, NODES_TEXTURE_SIZE);
+  float nodeIndex = getIndex(v_textureCoord, SORTED_TEXTURE_SIZE);
 
   if (nodeIndex < NODES_COUNT) {
     float closestCentroidID = getValueInTexture(u_closestCentroidTexture, nodeIndex, NODES_TEXTURE_SIZE).x;
