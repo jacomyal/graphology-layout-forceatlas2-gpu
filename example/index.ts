@@ -41,7 +41,7 @@ const BOOLEAN_KEYS = [
 const BOOLEAN_KEYS_SET = new Set<string>(BOOLEAN_KEYS);
 type BooleanKey = (typeof BOOLEAN_KEYS)[number];
 
-type RepulsionMode = "all-pairs" | "quad-tree" | "k-means";
+type RepulsionMode = "all-pairs" | "quad-tree" | "k-means" | "k-means-grouped";
 
 type Params = Record<NumberKey, number> &
   Record<BooleanKey, boolean> & {
@@ -106,6 +106,7 @@ const FORM_FIELDS: FieldDef[] = [
       { value: "all-pairs", label: "All pairs (exact, slow)" },
       { value: "quad-tree", label: "Quad-tree (Barnes-Hut)" },
       { value: "k-means", label: "K-means approximation" },
+      { value: "k-means-grouped", label: "K-means grouped (hybrid)" },
     ],
   },
   { type: "number", name: "quadTreeDepth", label: "Tree depth", step: "1", min: "1" },
@@ -176,14 +177,15 @@ function buildForm(form: HTMLFormElement, params: Params) {
     const useEuroSIS = data.get("useEuroSIS") === "on";
     const mode = data.get("repulsionMode") as RepulsionMode;
     const needsTree = mode === "quad-tree";
+    const needsKMeans = mode === "k-means" || mode === "k-means-grouped";
 
     const toggle = (name: string, show: boolean) => {
       form.querySelector(`[data-field="${name}"]`)?.classList.toggle("hidden", !show);
     };
 
     ["graphOrder", "graphSize", "graphClusters", "graphClusterDensity"].forEach((f) => toggle(f, !useEuroSIS));
-    ["treeDepth", "treeTheta"].forEach((f) => toggle(f, needsTree));
-    ["kMeansCentroids", "kMeansSteps"].forEach((f) => toggle(f, mode === "k-means"));
+    ["quadTreeDepth", "quadTreeTheta"].forEach((f) => toggle(f, needsTree));
+    ["kMeansCentroids", "kMeansSteps"].forEach((f) => toggle(f, needsKMeans));
   };
 
   form.addEventListener("change", updateVisibility);
@@ -257,6 +259,8 @@ async function init() {
     switch (params.repulsionMode) {
       case "k-means":
         return { type: "k-means", centroids: params.kMeansCentroids, steps: params.kMeansSteps };
+      case "k-means-grouped":
+        return { type: "k-means-grouped", centroids: params.kMeansCentroids, steps: params.kMeansSteps };
       case "quad-tree":
         return { type: "quad-tree", depth: params.quadTreeDepth, theta: params.quadTreeTheta };
       default:

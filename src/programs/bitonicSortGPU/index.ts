@@ -43,7 +43,7 @@ export class BitonicSortGPU {
    * Public API:
    * ***********
    */
-  public async sort() {
+  public sort() {
     const { extendedValuesCount, bitonicProgram } = this;
 
     // Activate program:

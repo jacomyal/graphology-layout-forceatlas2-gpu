@@ -38,7 +38,7 @@ describe("Quad-tree GPU Program", () => {
     // Index nodes in the quad-tree:
     const quadTree = new QuadTreeGPU(gl, { nodesCount: nodes.length }, { depth });
     quadTree.setNodesData(nodes);
-    await quadTree.compute();
+    quadTree.compute();
     await waitForGPUCompletion(gl);
 
     // Check boundaries:

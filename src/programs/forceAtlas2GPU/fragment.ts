@@ -21,7 +21,11 @@ export function getForceAtlas2FragmentShader({
 } & ForceAtlas2Settings) {
   const quadTreeDepth = repulsion.type === "quad-tree" ? repulsion.depth : 1;
   const quadTreeTheta = repulsion.type === "quad-tree" ? repulsion.theta : 0;
-  const kMeansCentroids = repulsion.type === "k-means" ? repulsion.centroids : 1;
+  const kMeansCentroids =
+    repulsion.type === "k-means" || repulsion.type === "k-means-grouped" ? repulsion.centroids : 1;
+
+  // For k-means-grouped, we need the extended node count (next power of 2) for bitonicSort output texture
+  const extendedNodesCount = 2 ** Math.ceil(Math.log2(graph.order));
 
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
@@ -29,6 +33,7 @@ precision highp float;
 
 #define NODES_COUNT ${numberToGLSLFloat(graph.order)}
 #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.order))}
+#define EXTENDED_NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(extendedNodesCount))}
 #define EDGES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.size * 2))}
 #define QUAD_TREE_DEPTH ${Math.floor(quadTreeDepth)}
 #define QUAD_TREE_REGIONS_COUNT ${Math.floor(getRegionsCount(quadTreeDepth))}
@@ -42,6 +47,7 @@ ${strongGravityMode ? "#define STRONG_GRAVITY_MODE" : ""}
 ${outboundAttractionDistribution ? "#define OUTBOUND_ATTRACTION_DISTRIBUTION" : ""}
 ${repulsion.type === "quad-tree" ? "#define QUAD_TREE_ENABLED" : ""}
 ${repulsion.type === "k-means" ? "#define K_MEANS_ENABLED" : ""}
+${repulsion.type === "k-means-grouped" ? "#define K_MEANS_GROUPED_ENABLED" : ""}
 
 // Graph data
 uniform sampler2D u_nodesPositionTexture;
@@ -58,6 +64,11 @@ uniform sampler2D u_boundariesTexture;
 
 // K-means
 uniform sampler2D u_centroidsPosition;
+
+// K-means-grouped
+uniform sampler2D u_centroidsOffsets;
+uniform sampler2D u_nodesInCentroids;
+uniform sampler2D u_closestCentroid;
 
 in vec2 v_textureCoord;
 
@@ -171,7 +182,7 @@ void main() {
         float endIndex = startIndex + regionOffset.x;
 
         for (float j = startIndex; j < endIndex; j++) {
-          float otherNodeIndex = getValueInTexture(u_nodesInRegionsTexture, j, NODES_TEXTURE_SIZE).x;
+          float otherNodeIndex = getValueInTexture(u_nodesInRegionsTexture, j, EXTENDED_NODES_TEXTURE_SIZE).x;
           vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
           vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
           float otherNodeMass = otherNodePosition.z;
@@ -218,6 +229,69 @@ void main() {
       if (dSquare > 0.0) {
         factor = repulsionCoefficient * nodeMass * centroidMass / dSquare;
       }
+
+      dx += diff.x * factor;
+      dy += diff.y * factor;
+    }
+
+  #elif defined(K_MEANS_GROUPED_ENABLED)
+    // Hybrid k-means repulsion with intra-cluster node-to-node:
+    float nodeClosestCentroidID = getValueInTexture(u_closestCentroid, nodeIndex, NODES_TEXTURE_SIZE).x;
+
+    // 1. Inter-cluster: Node-to-centroid repulsion for OTHER centroids
+    for (float centroidID = 0.0; centroidID < K_MEANS_CENTROIDS_COUNT; centroidID++) {
+      if (centroidID == nodeClosestCentroidID) continue;
+
+      vec4 centroidData = getValueInTexture(u_centroidsPosition, centroidID, K_MEANS_CENTROIDS_TEXTURE_SIZE);
+      vec2 centroidPosition = centroidData.xy;
+      float centroidMass = centroidData.z;
+
+      vec2 diff = nodePosition.xy - centroidPosition.xy;
+      float factor = 0.0;
+
+      // Linear Repulsion
+      float dSquare = dot(diff, diff);
+      if (dSquare > 0.0) {
+        factor = repulsionCoefficient * nodeMass * centroidMass / dSquare;
+      }
+
+      dx += diff.x * factor;
+      dy += diff.y * factor;
+    }
+
+    // 2. Intra-cluster: Node-to-node repulsion within same centroid
+    vec2 centroidOffset = getValueInTexture(u_centroidsOffsets, nodeClosestCentroidID, K_MEANS_CENTROIDS_TEXTURE_SIZE).xy;
+    float startIndex = centroidOffset.y;
+    float endIndex = startIndex + centroidOffset.x;
+
+    for (float j = startIndex; j < endIndex; j++) {
+      float otherNodeIndex = getValueInTexture(u_nodesInCentroids, j, EXTENDED_NODES_TEXTURE_SIZE).x;
+      if (otherNodeIndex == nodeIndex) continue;
+
+      vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
+      vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
+      float otherNodeMass = otherNodePosition.z;
+      float otherNodeSize = otherNodeMetadata.r;
+
+      vec2 diff = nodePosition.xy - otherNodePosition.xy;
+      float factor = 0.0;
+
+      #if defined(ADJUST_SIZES)
+        // Anticollision Linear Repulsion
+        float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
+        if (d > 0.0) {
+          factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
+        } else if (d < 0.0) {
+          factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
+        }
+
+      #else
+        // Linear Repulsion
+        float dSquare = dot(diff, diff);
+        if (dSquare > 0.0) {
+          factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
+        }
+      #endif
 
       dx += diff.x * factor;
       dy += diff.y * factor;

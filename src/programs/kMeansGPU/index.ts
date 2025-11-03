@@ -148,4 +148,8 @@ export class KMeansGPU {
   public getCentroidsPosition(): WebGLTexture {
     return this.centroidPositionProgram.outputTexturesIndex.centroidsPosition.texture;
   }
+
+  public getClosestCentroid(): WebGLTexture {
+    return this.closestCentroidProgram.outputTexturesIndex.closestCentroid.texture;
+  }
 }

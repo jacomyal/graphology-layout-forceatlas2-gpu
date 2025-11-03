@@ -150,7 +150,7 @@ export class QuadTreeGPU {
     WebCLProgram.wirePrograms({ boundariesProgram, indexProgram, aggregateProgram, offsetProgram, setupSortProgram });
   }
 
-  public async compute() {
+  public compute() {
     const { boundariesProgram, indexProgram, aggregateProgram, offsetProgram, setupSortProgram, bitonicSort } = this;
 
     // Search boundaries
@@ -183,7 +183,7 @@ export class QuadTreeGPU {
       valuesTexture: setupSortProgram.outputTexturesIndex.values.texture,
       sortOnTexture: setupSortProgram.outputTexturesIndex.sortOn.texture,
     });
-    await bitonicSort.sort();
+    bitonicSort.sort();
   }
 
   // These methods are for the WebGL pipelines:

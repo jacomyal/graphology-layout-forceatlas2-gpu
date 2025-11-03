@@ -27,15 +27,15 @@ ${GLSL_getIndex}
 
 void main() {
   float regionIndex = getIndex(v_textureCoord, TEXTURE_SIZE);
-  float regionCount = getValueInTexture(u_regionsBarycentersTexture, regionIndex, TEXTURE_SIZE).w;
+  float regionNodesCount = getValueInTexture(u_regionsBarycentersTexture, regionIndex, TEXTURE_SIZE).w;
 
   float offset = 0.0;
   for (float i = DEPTH_OFFSET; i < regionIndex; i++) {
-    float count = getValueInTexture(u_regionsBarycentersTexture, i, TEXTURE_SIZE).w;
-    offset += count;
+    float nodesCount = getValueInTexture(u_regionsBarycentersTexture, i, TEXTURE_SIZE).w;
+    offset += nodesCount;
   }
 
-  regionOffset.x = regionCount;
+  regionOffset.x = regionNodesCount;
   regionOffset.y = offset;
 }`;
 
