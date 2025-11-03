@@ -25,7 +25,13 @@ ${GLSL_getIndex}
 
 void main() {
   float centroidIndex = getIndex(v_textureCoord, TEXTURE_SIZE);
-  if (centroidIndex >= CENTROIDS_COUNT) return;
+
+  // Out-of-bounds fragments: write sentinel values
+  if (centroidIndex >= CENTROIDS_COUNT) {
+    centroidOffset.x = -1.0;
+    centroidOffset.y = -1.0;
+    return;
+  }
 
   float centroidNodesCount = getValueInTexture(u_centroidsPositionTexture, centroidIndex, TEXTURE_SIZE).w;
 

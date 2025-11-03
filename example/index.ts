@@ -37,6 +37,7 @@ const BOOLEAN_KEYS = [
   "useFA2GPU",
   "useEuroSIS",
   "startRandom",
+  "debug",
 ] as const;
 const BOOLEAN_KEYS_SET = new Set<string>(BOOLEAN_KEYS);
 type BooleanKey = (typeof BOOLEAN_KEYS)[number];
@@ -60,6 +61,7 @@ const DEFAULT_PARAMS: Params = {
   useEuroSIS: false,
   useFA2GPU: true,
   startRandom: true,
+  debug: false,
   repulsionMode: "quad-tree",
   quadTreeDepth: 3,
   quadTreeTheta: 0.5,
@@ -90,6 +92,7 @@ const FORM_FIELDS: FieldDef[] = [
   { type: "number", name: "graphClusterDensity", label: "Cluster density", step: "0.01", min: "0" },
   { type: "checkbox", name: "useFA2GPU", label: "Use FA2 GPU", section: true },
   { type: "checkbox", name: "startRandom", label: "Start with random positions" },
+  { type: "checkbox", name: "debug", label: "Enable debug mode (check console)" },
   { type: "number", name: "iterationsPerStep", label: "Iterations per step", step: "1", min: "1" },
   { type: "number", name: "gravity", label: "Gravity", step: "0.001", min: "0" },
   { type: "number", name: "scalingRatio", label: "Scaling ratio", step: "0.1", min: "0" },

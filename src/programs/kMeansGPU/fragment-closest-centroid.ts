@@ -34,7 +34,12 @@ ${GLSL_getIndex}
 
 void main() {
   float nodeIndex = getIndex(v_textureCoord, NODES_TEXTURE_SIZE);
-  if (nodeIndex >= NODES_COUNT) return;
+
+  // Out-of-bounds fragments: write sentinel value
+  if (nodeIndex >= NODES_COUNT) {
+    closestCentroid.x = -1.0;
+    return;
+  }
 
   vec2 position = getValueInTexture(u_nodesPositionTexture, nodeIndex, NODES_TEXTURE_SIZE).xy;
   float closestCentroidID = 0.0;
@@ -48,7 +53,7 @@ void main() {
       position,
       getValueInTexture(u_centroidsPositionTexture, centroidID, CENTROIDS_TEXTURE_SIZE).xy
     );
-    
+
     if (distanceToCentroid < distanceToClosestCentroid) {
       distanceToClosestCentroid = distanceToCentroid;
       closestCentroidID = centroidID;

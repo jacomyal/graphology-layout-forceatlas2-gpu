@@ -14,6 +14,7 @@ export type ForceAtlas2Settings = {
   slowDown: number;
   maxForce: number;
   iterationsPerStep: number;
+  debug: boolean;
 };
 
 export const DEFAULT_FORCE_ATLAS_2_SETTINGS: ForceAtlas2Settings = {
@@ -28,4 +29,5 @@ export const DEFAULT_FORCE_ATLAS_2_SETTINGS: ForceAtlas2Settings = {
   slowDown: 1,
   maxForce: 10,
   iterationsPerStep: 10,
+  debug: false,
 };
