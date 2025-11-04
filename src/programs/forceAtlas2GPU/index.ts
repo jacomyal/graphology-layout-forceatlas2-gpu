@@ -173,16 +173,20 @@ export class ForceAtlas2GPU {
       debug: this.params.debug,
     });
 
-    this.fa2Program.dataTexturesIndex.nodesRegions.texture = this.quadTree.getNodesRegionsTexture();
-    this.fa2Program.dataTexturesIndex.regionsBarycenters.texture = this.quadTree.getRegionsBarycentersTexture();
-    this.fa2Program.dataTexturesIndex.regionsOffsets.texture = this.quadTree.getRegionsOffsetsTexture();
-    this.fa2Program.dataTexturesIndex.nodesInRegions.texture = this.quadTree.getNodesInRegionsTexture();
-    this.fa2Program.dataTexturesIndex.boundaries.texture = this.quadTree.getBoundariesTexture();
-
-    this.fa2Program.dataTexturesIndex.centroidsPosition.texture = this.kMeans.getCentroidsPosition();
-    this.fa2Program.dataTexturesIndex.centroidsOffsets.texture = this.kMeansGrouped.getCentroidsOffsets();
-    this.fa2Program.dataTexturesIndex.nodesInCentroids.texture = this.kMeansGrouped.getNodesInCentroids();
-    this.fa2Program.dataTexturesIndex.closestCentroid.texture = this.kMeansGrouped.getClosestCentroid();
+    if (repulsion.type === "quad-tree") {
+      this.fa2Program.dataTexturesIndex.nodesRegions.texture = this.quadTree.getNodesRegionsTexture();
+      this.fa2Program.dataTexturesIndex.regionsBarycenters.texture = this.quadTree.getRegionsBarycentersTexture();
+      this.fa2Program.dataTexturesIndex.regionsOffsets.texture = this.quadTree.getRegionsOffsetsTexture();
+      this.fa2Program.dataTexturesIndex.nodesInRegions.texture = this.quadTree.getNodesInRegionsTexture();
+      this.fa2Program.dataTexturesIndex.boundaries.texture = this.quadTree.getBoundariesTexture();
+    } else if (repulsion.type === "k-means") {
+      this.fa2Program.dataTexturesIndex.centroidsPosition.texture = this.kMeans.getCentroidsPosition();
+    } else if (repulsion.type === "k-means-grouped") {
+      this.fa2Program.dataTexturesIndex.centroidsPosition.texture = this.kMeansGrouped.getCentroidsPosition();
+      this.fa2Program.dataTexturesIndex.centroidsOffsets.texture = this.kMeansGrouped.getCentroidsOffsets();
+      this.fa2Program.dataTexturesIndex.nodesInCentroids.texture = this.kMeansGrouped.getNodesInCentroids();
+      this.fa2Program.dataTexturesIndex.closestCentroid.texture = this.kMeansGrouped.getClosestCentroid();
+    }
   }
 
   private readGraph() {
@@ -297,9 +301,11 @@ export class ForceAtlas2GPU {
 
       // Compute additional repulsion structures if needed:
       if (repulsion.type === "quad-tree") {
+        quadTree.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
         quadTree.compute();
         fa2Program.activate();
       } else if (repulsion.type === "k-means") {
+        kMeans.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
         kMeans.compute({
           steps: repulsion.steps,
           reinitialize: repulsion.reinitialize ?? true,
@@ -307,15 +313,12 @@ export class ForceAtlas2GPU {
         });
         fa2Program.activate();
       } else if (repulsion.type === "k-means-grouped") {
+        kMeansGrouped.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
         kMeansGrouped.compute({
           steps: repulsion.steps,
           reinitialize: repulsion.reinitialize ?? true,
           iterationCount: this.totalIterations,
         });
-        fa2Program.dataTexturesIndex.centroidsPosition.texture = kMeansGrouped.getCentroidsPosition();
-        fa2Program.dataTexturesIndex.centroidsOffsets.texture = kMeansGrouped.getCentroidsOffsets();
-        fa2Program.dataTexturesIndex.nodesInCentroids.texture = kMeansGrouped.getNodesInCentroids();
-        fa2Program.dataTexturesIndex.closestCentroid.texture = kMeansGrouped.getClosestCentroid();
         fa2Program.activate();
       }
 
@@ -393,5 +396,14 @@ export class ForceAtlas2GPU {
 
   public isRunning() {
     return this.running;
+  }
+
+  // Debug methods
+  public getKMeans() {
+    return this.kMeans;
+  }
+
+  public getKMeansGrouped() {
+    return this.kMeansGrouped;
   }
 }
