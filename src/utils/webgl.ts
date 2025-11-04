@@ -1,3 +1,17 @@
+export const DATA_TEXTURES_LEVELS: Record<number, number> = {
+  1: WebGL2RenderingContext.R32F,
+  2: WebGL2RenderingContext.RG32F,
+  3: WebGL2RenderingContext.RGB32F,
+  4: WebGL2RenderingContext.RGBA32F,
+};
+
+export const DATA_TEXTURES_FORMATS: Record<number, number> = {
+  1: WebGL2RenderingContext.RED,
+  2: WebGL2RenderingContext.RG,
+  3: WebGL2RenderingContext.RGB,
+  4: WebGL2RenderingContext.RGBA,
+};
+
 export function setupWebGL2Context() {
   // Initialize WebGL2 context:
   const canvas = document.createElement("canvas");
@@ -17,6 +31,33 @@ export function setupWebGL2Context() {
 
 export function getTextureSize(itemsCount: number) {
   return Math.ceil(Math.sqrt(itemsCount));
+}
+
+export function readTextureData(
+  gl: WebGL2RenderingContext,
+  texture: WebGLTexture,
+  items: number,
+  attributesPerItem: number,
+): Float32Array {
+  const textureSize = getTextureSize(items);
+
+  const framebuffer = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(framebuffer);
+    throw new Error("Failed to create framebuffer for reading texture data.");
+  }
+
+  const outputArr = new Float32Array(textureSize * textureSize * attributesPerItem);
+  gl.readPixels(0, 0, textureSize, textureSize, DATA_TEXTURES_FORMATS[attributesPerItem], gl.FLOAT, outputArr);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(framebuffer);
+
+  return outputArr;
 }
 
 /**

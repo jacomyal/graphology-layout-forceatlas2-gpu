@@ -1,9 +1,10 @@
-import { getTextureSize } from "../../utils/webgl";
-import { DATA_TEXTURES_FORMATS, WebCLProgram } from "../webCLProgram";
+import { getTextureSize, readTextureData } from "../../utils/webgl";
+import { WebCLProgram } from "../webCLProgram";
 import { getVertexShader } from "../webCLProgram/vertex";
 import { getCentroidPositionFragmentShader } from "./fragment-centroid-position";
 import { getClosestCentroidFragmentShader } from "./fragment-closest-centroid";
 import { getCentroidInitialPositionFragmentShader } from "./fragment-initial-centroid-positions";
+
 
 const ATTRIBUTES_PER_ITEM = {
   nodesPosition: 4,
@@ -12,6 +13,8 @@ const ATTRIBUTES_PER_ITEM = {
 } as const;
 
 export class KMeansGPU {
+  private name = "K-means GPU";
+
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
   private gl: WebGL2RenderingContext;
@@ -29,12 +32,7 @@ export class KMeansGPU {
 
   constructor(
     gl: WebGL2RenderingContext,
-    {
-      nodesCount,
-      centroidsCount,
-      nodesTexture,
-      debug = false,
-    }: { nodesCount: number; centroidsCount?: number; nodesTexture?: WebGLTexture; debug?: boolean },
+    { nodesCount, centroidsCount, debug = false }: { nodesCount: number; centroidsCount?: number; debug?: boolean },
   ) {
     this.gl = gl;
     this.nodesCount = nodesCount;
@@ -104,49 +102,28 @@ export class KMeansGPU {
         },
       ],
     });
-
-    this.wireTextures(nodesTexture);
-    this.initialize();
   }
 
   /**
    * Public API:
    * ***********
    */
+  public wireTextures(nodesTexture: WebGLTexture) {
+    const { initialPositionsProgram, closestCentroidProgram, centroidPositionProgram } = this;
+
+    initialPositionsProgram.dataTexturesIndex.nodesPosition.texture = nodesTexture;
+    WebCLProgram.wirePrograms({ initialPositionsProgram, closestCentroidProgram, centroidPositionProgram });
+  }
+
   public initialize() {
-    const { initialPositionsProgram, debug } = this;
+    const { initialPositionsProgram } = this;
 
     initialPositionsProgram.activate();
     initialPositionsProgram.prepare();
     initialPositionsProgram.compute();
-
-    if (debug) {
-      console.log("[DEBUG] K-means initialization:");
-      const centroidsData = this.getCentroidsPositionData();
-      for (let i = 0; i < Math.min(3, this.centroidsCount); i++) {
-        const x = centroidsData[i * 4];
-        const y = centroidsData[i * 4 + 1];
-        console.log(`  Centroid ${i}: initial position = (${x.toFixed(2)}, ${y.toFixed(2)})`);
-      }
-
-      // Check if all centroids are at the same position
-      const allSame = centroidsData[0] === centroidsData[4] && centroidsData[1] === centroidsData[5];
-      if (allSame) {
-        console.warn("[DEBUG] WARNING: All centroids initialized to same position!");
-      }
-
-      this.validateCentroidsPosition("after initialization");
-    }
   }
 
-  public wireTextures(nodesTexture?: WebGLTexture) {
-    const { initialPositionsProgram, closestCentroidProgram, centroidPositionProgram } = this;
-
-    if (nodesTexture) initialPositionsProgram.dataTexturesIndex.nodesPosition.texture = nodesTexture;
-    WebCLProgram.wirePrograms({ initialPositionsProgram, closestCentroidProgram, centroidPositionProgram });
-  }
-
-  public compute({ steps = 10 }: { steps?: number } = {}) {
+  public compute({ steps }: { steps: number }) {
     const { closestCentroidProgram, centroidPositionProgram, debug } = this;
 
     let remainingSteps = steps;
@@ -162,18 +139,11 @@ export class KMeansGPU {
         for (let i = 0; i < this.nodesCount; i++) {
           counts[assignments[i]]++;
         }
-        console.log(`[DEBUG] After closestCentroid compute: distribution = ${counts.slice(0, Math.min(5, this.centroidsCount)).join(", ")}`);
-
-        this.validateClosestCentroid("after closestCentroidProgram compute");
       }
 
       centroidPositionProgram.activate();
       centroidPositionProgram.prepare();
       centroidPositionProgram.compute();
-
-      if (debug && remainingSteps === steps - 1) {
-        this.validateCentroidsPosition("after centroidPositionProgram compute");
-      }
 
       if (remainingSteps) {
         centroidPositionProgram.swapTextures("centroidsPosition", "centroidsPosition");
@@ -181,6 +151,8 @@ export class KMeansGPU {
           centroidPositionProgram.outputTexturesIndex.centroidsPosition.texture;
       }
     }
+
+    if (debug) this.validate();
   }
 
   public getCentroidsPosition(): WebGLTexture {
@@ -201,7 +173,7 @@ export class KMeansGPU {
   }
 
   public setNodesData(nodes: { x: number; y: number; mass?: number }[]): void {
-    const { nodesCount } = this;
+    const { nodesCount, initialPositionsProgram, closestCentroidProgram, centroidPositionProgram } = this;
     const textureSize = getTextureSize(nodesCount);
     const data = new Float32Array(4 * textureSize ** 2);
 
@@ -212,51 +184,36 @@ export class KMeansGPU {
       data[i * 4 + 3] = 0;
     });
 
-    this.initialPositionsProgram.activate();
-    this.initialPositionsProgram.prepare();
-    this.initialPositionsProgram.setTextureData("nodesPosition", data, nodesCount);
+    initialPositionsProgram.activate();
+    initialPositionsProgram.prepare();
+    initialPositionsProgram.setTextureData("nodesPosition", data, nodesCount);
 
-    this.closestCentroidProgram.activate();
-    this.closestCentroidProgram.prepare();
-    this.closestCentroidProgram.setTextureData("nodesPosition", data, nodesCount);
+    closestCentroidProgram.activate();
+    closestCentroidProgram.prepare();
+    closestCentroidProgram.setTextureData("nodesPosition", data, nodesCount);
 
-    this.centroidPositionProgram.activate();
-    this.centroidPositionProgram.prepare();
-    this.centroidPositionProgram.setTextureData("nodesPosition", data, nodesCount);
+    centroidPositionProgram.activate();
+    centroidPositionProgram.prepare();
+    centroidPositionProgram.setTextureData("nodesPosition", data, nodesCount);
+
+    // Wire programs together so outputs connect to inputs
+    WebCLProgram.wirePrograms({ initialPositionsProgram, closestCentroidProgram, centroidPositionProgram });
+
+    // Initialize centroids by sampling from node positions
+    initialPositionsProgram.activate();
+    initialPositionsProgram.prepare();
+    initialPositionsProgram.compute();
   }
 
   /**
    * Debug validation methods:
    * ************************
    */
-  private readTextureData(texture: WebGLTexture, items: number, attributesPerItem: number): Float32Array {
-    const { gl } = this;
-    const textureSize = getTextureSize(items);
-
-    const framebuffer = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.deleteFramebuffer(framebuffer);
-      throw new Error("Failed to create framebuffer for reading texture data.");
-    }
-
-    const outputArr = new Float32Array(textureSize * textureSize * attributesPerItem);
-    gl.readPixels(0, 0, textureSize, textureSize, DATA_TEXTURES_FORMATS[attributesPerItem], gl.FLOAT, outputArr);
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.deleteFramebuffer(framebuffer);
-
-    return outputArr;
-  }
-
-  private validateCentroidsPosition(stage: string): void {
-    const { centroidsCount } = this;
+  private validateCentroidsPosition(): void {
+    const { centroidsCount, name } = this;
     const textureSize = getTextureSize(centroidsCount);
     const totalElements = textureSize * textureSize;
-    const centroidsData = this.readTextureData(this.getCentroidsPosition(), centroidsCount, 4);
+    const centroidsData = readTextureData(this.gl, this.getCentroidsPosition(), centroidsCount, 4);
 
     for (let i = 0; i < totalElements; i++) {
       const x = centroidsData[i * 4];
@@ -267,31 +224,31 @@ export class KMeansGPU {
       if (i < centroidsCount) {
         // Valid centroid: check for reasonable values
         if (isNaN(x) || isNaN(y) || isNaN(mass) || isNaN(size)) {
-          throw new Error(`[${stage}] Centroid ${i} has NaN values: (${x}, ${y}, mass=${mass}, size=${size})`);
+          throw new Error(`[${name}] Centroid ${i} has NaN values: (${x}, ${y}, mass=${mass}, size=${size})`);
         }
         if (!isFinite(x) || !isFinite(y) || !isFinite(mass) || !isFinite(size)) {
-          throw new Error(`[${stage}] Centroid ${i} has infinite values: (${x}, ${y}, mass=${mass}, size=${size})`);
+          throw new Error(`[${name}] Centroid ${i} has infinite values: (${x}, ${y}, mass=${mass}, size=${size})`);
         }
         // Check for sentinel values leaking into valid data
         if (x === -1 && y === -1 && mass === -1 && size === -1) {
-          throw new Error(`[${stage}] Valid centroid ${i} has sentinel values (all -1)`);
+          throw new Error(`[${name}] Valid centroid ${i} has sentinel values (all -1)`);
         }
       } else {
         // Out-of-bounds: should have sentinel values
         if (x !== -1 || y !== -1 || mass !== -1 || size !== -1) {
           console.warn(
-            `[${stage}] Out-of-bounds centroid ${i} does not have sentinel values: (${x}, ${y}, mass=${mass}, size=${size})`,
+            `[${name}] Out-of-bounds centroid ${i} does not have sentinel values: (${x}, ${y}, mass=${mass}, size=${size})`,
           );
         }
       }
     }
   }
 
-  private validateClosestCentroid(stage: string): void {
-    const { nodesCount, centroidsCount } = this;
+  private validateClosestCentroid(): void {
+    const { nodesCount, centroidsCount, name } = this;
     const textureSize = getTextureSize(nodesCount);
     const totalElements = textureSize * textureSize;
-    const closestCentroidData = this.readTextureData(this.getClosestCentroid(), nodesCount, 1);
+    const closestCentroidData = readTextureData(this.gl, this.getClosestCentroid(), nodesCount, 1);
 
     for (let i = 0; i < totalElements; i++) {
       const centroidID = closestCentroidData[i];
@@ -299,29 +256,27 @@ export class KMeansGPU {
       if (i < nodesCount) {
         // Valid node: check for valid centroid ID
         if (isNaN(centroidID)) {
-          throw new Error(`[${stage}] Node ${i} has NaN closest centroid`);
+          throw new Error(`[${name}] Node ${i} has NaN closest centroid`);
         }
         if (centroidID === -1) {
-          throw new Error(`[${stage}] Valid node ${i} has sentinel value -1 for closest centroid`);
+          throw new Error(`[${name}] Valid node ${i} has sentinel value -1 for closest centroid`);
         }
         if (centroidID < 0 || centroidID >= centroidsCount) {
           throw new Error(
-            `[${stage}] Node ${i} has invalid closest centroid: ${centroidID} (must be 0-${centroidsCount - 1})`,
+            `[${name}] Node ${i} has invalid closest centroid: ${centroidID} (must be 0-${centroidsCount - 1})`,
           );
         }
       } else {
         // Out-of-bounds: should have sentinel value
         if (centroidID !== -1) {
-          console.warn(`[${stage}] Out-of-bounds node ${i} does not have sentinel value: ${centroidID}`);
+          console.warn(`[${name}] Out-of-bounds node ${i} does not have sentinel value: ${centroidID}`);
         }
       }
     }
   }
 
-  public validate(stage: string): void {
-    console.log(`[DEBUG] Validating k-means state at stage: ${stage}`);
-    this.validateCentroidsPosition(stage);
-    this.validateClosestCentroid(stage);
-    console.log(`[DEBUG] ✓ All validations passed for stage: ${stage}`);
+  public validate(): void {
+    this.validateCentroidsPosition();
+    this.validateClosestCentroid();
   }
 }

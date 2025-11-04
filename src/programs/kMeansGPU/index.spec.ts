@@ -22,13 +22,16 @@ describe("K-means GPU Program", () => {
   test<Test>("It should initialize centroids from node positions", async ({ gl }) => {
     // Create 9 nodes evenly distributed
     const nodes = [
-      { x: -10, y: -10 }, // Top-left cluster
+      // Top-left cluster
+      { x: -10, y: -10 },
       { x: -9, y: -10 },
       { x: -10, y: -9 },
-      { x: 0, y: 0 }, // Center cluster
+      // Center cluster
+      { x: 0, y: 0 },
       { x: 1, y: 0 },
       { x: 0, y: 1 },
-      { x: 10, y: 10 }, // Bottom-right cluster
+      // Bottom-right cluster
+      { x: 10, y: 10 },
       { x: 11, y: 10 },
       { x: 10, y: 11 },
     ];
@@ -36,7 +39,6 @@ describe("K-means GPU Program", () => {
     const centroidsCount = 3;
     const kMeans = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount });
     kMeans.setNodesData(nodes);
-    kMeans.initialize();
     await waitForGPUCompletion(gl);
 
     const centroidsData = kMeans.getCentroidsPositionData();
@@ -57,13 +59,16 @@ describe("K-means GPU Program", () => {
   test<Test>("It should assign each node to its closest centroid", async ({ gl }) => {
     // Create clear clusters: far left, center, far right
     const nodes = [
-      { x: -100, y: 0 }, // Cluster 0
+      // Cluster 0
+      { x: -100, y: 0 },
       { x: -99, y: 0 },
       { x: -98, y: 1 },
-      { x: 0, y: 0 }, // Cluster 1
+      // Cluster 1
+      { x: 0, y: 0 },
       { x: 1, y: 0 },
       { x: 0, y: 1 },
-      { x: 100, y: 0 }, // Cluster 2
+      // Cluster 2
+      { x: 100, y: 0 },
       { x: 99, y: 0 },
       { x: 100, y: 1 },
     ];
@@ -71,7 +76,6 @@ describe("K-means GPU Program", () => {
     const centroidsCount = 3;
     const kMeans = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount });
     kMeans.setNodesData(nodes);
-    kMeans.initialize();
     kMeans.compute({ steps: 1 });
     await waitForGPUCompletion(gl);
 
@@ -134,7 +138,6 @@ describe("K-means GPU Program", () => {
     const centroidsCount = 4;
     const kMeans = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount });
     kMeans.setNodesData(nodes);
-    kMeans.initialize();
     kMeans.compute({ steps: 5 });
     await waitForGPUCompletion(gl);
 
@@ -164,10 +167,12 @@ describe("K-means GPU Program", () => {
   test<Test>("It should compute centroid positions as barycenters of assigned nodes", async ({ gl }) => {
     // Create 6 nodes in 2 clear clusters
     const nodes = [
-      { x: -10, y: 0 }, // Cluster 0: average should be (-10, 0)
+      // Cluster 0: average should be (-10, 0)
       { x: -10, y: 0 },
       { x: -10, y: 0 },
-      { x: 10, y: 5 }, // Cluster 1: average should be (10, 5)
+      { x: -10, y: 0 },
+      // Cluster 1: average should be (10, 5)
+      { x: 10, y: 5 },
       { x: 10, y: 5 },
       { x: 10, y: 5 },
     ];
@@ -175,7 +180,6 @@ describe("K-means GPU Program", () => {
     const centroidsCount = 2;
     const kMeans = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount });
     kMeans.setNodesData(nodes);
-    kMeans.initialize();
     kMeans.compute({ steps: 3 });
     await waitForGPUCompletion(gl);
 
@@ -217,7 +221,6 @@ describe("K-means GPU Program", () => {
     const centroidsCount = 3;
     const kMeans = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount });
     kMeans.setNodesData(nodes);
-    kMeans.initialize();
     kMeans.compute({ steps: 2 });
     await waitForGPUCompletion(gl);
 
@@ -252,7 +255,6 @@ describe("K-means GPU Program", () => {
     const centroidsCount = 2;
     const kMeans = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount });
     kMeans.setNodesData(nodes);
-    kMeans.initialize();
 
     // Get assignments after 1 step
     kMeans.compute({ steps: 1 });
@@ -285,7 +287,6 @@ describe("K-means GPU Program", () => {
     const centroidsCount = 4;
     const kMeans = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount });
     kMeans.setNodesData(nodes);
-    kMeans.initialize();
     kMeans.compute({ steps: 5 });
     await waitForGPUCompletion(gl);
 

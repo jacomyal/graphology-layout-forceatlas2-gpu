@@ -296,28 +296,17 @@ export class ForceAtlas2GPU {
 
       // Compute additional repulsion structures if needed:
       if (repulsion.type === "quad-tree") {
-        quadTree.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
         quadTree.compute();
         fa2Program.activate();
       } else if (repulsion.type === "k-means") {
         kMeans.compute({ steps: repulsion.steps });
-        if (params.debug) {
-          console.log("[DEBUG] Validating k-means textures before FA2 compute");
-          kMeans.validate("before FA2 compute");
-        }
         fa2Program.activate();
       } else if (repulsion.type === "k-means-grouped") {
-        kMeansGrouped.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
         kMeansGrouped.compute({ steps: repulsion.steps });
         fa2Program.dataTexturesIndex.centroidsPosition.texture = kMeansGrouped.getCentroidsPosition();
         fa2Program.dataTexturesIndex.centroidsOffsets.texture = kMeansGrouped.getCentroidsOffsets();
         fa2Program.dataTexturesIndex.nodesInCentroids.texture = kMeansGrouped.getNodesInCentroids();
         fa2Program.dataTexturesIndex.closestCentroid.texture = kMeansGrouped.getClosestCentroid();
-        if (params.debug) {
-          console.log("[DEBUG] Validating k-means-grouped textures before FA2 compute");
-          kMeansGrouped.validate("before FA2 compute");
-          kMeansGrouped.debugState(fa2Program.dataTexturesIndex.nodesPosition.texture);
-        }
         fa2Program.activate();
       }
 
@@ -355,12 +344,18 @@ export class ForceAtlas2GPU {
     this.fa2Program.setTextureData("nodesMetadata", this.nodesMetadataArray, this.graph.order);
     this.fa2Program.setTextureData("edges", this.edgesArray, this.graph.size * 2);
 
-    if (this.params.repulsion.type === "k-means") {
+    if (this.params.repulsion.type === "quad-tree") {
+      // Wire nodes texture BEFORE initializing
+      this.quadTree.wireTextures(this.fa2Program.dataTexturesIndex.nodesPosition.texture);
+    } else if (this.params.repulsion.type === "k-means") {
+      // Wire nodes texture and initialize centroids
+      this.kMeans.wireTextures(this.fa2Program.dataTexturesIndex.nodesPosition.texture);
       this.kMeans.initialize();
     } else if (this.params.repulsion.type === "k-means-grouped") {
+      // Wire nodes texture and initialize centroids
+      this.kMeansGrouped.wireTextures(this.fa2Program.dataTexturesIndex.nodesPosition.texture);
       this.kMeansGrouped.initialize();
       // Run initial clustering to set up all textures
-      this.kMeansGrouped.wireTextures(this.fa2Program.dataTexturesIndex.nodesPosition.texture);
       this.kMeansGrouped.compute({ steps: this.params.repulsion.steps });
       this.fa2Program.dataTexturesIndex.centroidsPosition.texture = this.kMeansGrouped.getCentroidsPosition();
       this.fa2Program.dataTexturesIndex.centroidsOffsets.texture = this.kMeansGrouped.getCentroidsOffsets();
