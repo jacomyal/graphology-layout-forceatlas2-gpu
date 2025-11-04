@@ -6,8 +6,8 @@ export type ForceAtlas2Settings = {
   repulsion:
     | { type: "all-pairs" }
     | { type: "quad-tree"; depth: number; theta: number }
-    | { type: "k-means"; steps: number; centroids: number }
-    | { type: "k-means-grouped"; steps: number; centroids: number };
+    | { type: "k-means"; steps: number; centroids: number; reinitialize?: boolean }
+    | { type: "k-means-grouped"; steps: number; centroids: number; reinitialize?: boolean };
   edgeWeightInfluence: number;
   scalingRatio: number;
   gravity: number;

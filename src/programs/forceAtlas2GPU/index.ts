@@ -38,6 +38,7 @@ export class ForceAtlas2GPU {
   private running = false;
   private animationFrameID: null | number = null;
   private params: ForceAtlas2Settings;
+  private totalIterations = 0;
 
   // Graph data and various caches:
   private graph: ForceAtlas2Graph;
@@ -299,10 +300,18 @@ export class ForceAtlas2GPU {
         quadTree.compute();
         fa2Program.activate();
       } else if (repulsion.type === "k-means") {
-        kMeans.compute({ steps: repulsion.steps });
+        kMeans.compute({
+          steps: repulsion.steps,
+          reinitialize: repulsion.reinitialize ?? true,
+          iterationCount: this.totalIterations,
+        });
         fa2Program.activate();
       } else if (repulsion.type === "k-means-grouped") {
-        kMeansGrouped.compute({ steps: repulsion.steps });
+        kMeansGrouped.compute({
+          steps: repulsion.steps,
+          reinitialize: repulsion.reinitialize ?? true,
+          iterationCount: this.totalIterations,
+        });
         fa2Program.dataTexturesIndex.centroidsPosition.texture = kMeansGrouped.getCentroidsPosition();
         fa2Program.dataTexturesIndex.centroidsOffsets.texture = kMeansGrouped.getCentroidsOffsets();
         fa2Program.dataTexturesIndex.nodesInCentroids.texture = kMeansGrouped.getNodesInCentroids();
@@ -322,6 +331,8 @@ export class ForceAtlas2GPU {
       fa2Program.compute();
 
       if (remainingIterations > 0) this.swapFA2Textures();
+
+      this.totalIterations++;
     }
 
     this.updateGraph();

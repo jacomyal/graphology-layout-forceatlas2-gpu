@@ -309,4 +309,107 @@ describe("K-means GPU Program", () => {
     const emptyCentroids = centroidCounts.filter((count) => count === 0).length;
     expect(emptyCentroids, "Some centroids may be empty with more centroids than clusters").toBeLessThanOrEqual(2);
   });
+
+  test<Test>("It should use different initial centroids based on iterationCount", async ({ gl }) => {
+    // Create a large enough set of nodes to test varied initialization
+    const nodes = Array.from({ length: 20 }, (_, i) => ({
+      x: i * 2,
+      y: Math.sin(i) * 10,
+    }));
+
+    const centroidsCount = 4;
+
+    // Test with iterationCount = 0
+    const kMeans0 = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount, iterationCount: 0 });
+    kMeans0.setNodesData(nodes);
+    await waitForGPUCompletion(gl);
+    const centroids0 = kMeans0.getInitialCentroidsPositionData().slice(0, centroidsCount * 4);
+
+    // Test with iterationCount = 1
+    const kMeans1 = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount, iterationCount: 1 });
+    kMeans1.setNodesData(nodes);
+    await waitForGPUCompletion(gl);
+    const centroids1 = kMeans1.getInitialCentroidsPositionData().slice(0, centroidsCount * 4);
+
+    // Test with iterationCount = 5
+    const kMeans5 = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount, iterationCount: 5 });
+    kMeans5.setNodesData(nodes);
+    await waitForGPUCompletion(gl);
+    const centroids5 = kMeans5.getInitialCentroidsPositionData().slice(0, centroidsCount * 4);
+
+    // Verify that different iterationCounts produce different initial centroids
+    let diff0vs1 = 0;
+    let diff0vs5 = 0;
+    let diff1vs5 = 0;
+
+    for (let i = 0; i < centroidsCount * 4; i++) {
+      diff0vs1 += Math.abs(centroids0[i] - centroids1[i]);
+      diff0vs5 += Math.abs(centroids0[i] - centroids5[i]);
+      diff1vs5 += Math.abs(centroids1[i] - centroids5[i]);
+    }
+
+    // All three should be different
+    expect(diff0vs1, "iterationCount=0 and iterationCount=1 should produce different centroids").toBeGreaterThan(0);
+    expect(diff0vs5, "iterationCount=0 and iterationCount=5 should produce different centroids").toBeGreaterThan(0);
+    expect(diff1vs5, "iterationCount=1 and iterationCount=5 should produce different centroids").toBeGreaterThan(0);
+  });
+
+  test<Test>("It should produce deterministic results for same iterationCount", async ({ gl }) => {
+    const nodes = Array.from({ length: 15 }, (_, i) => ({
+      x: i * 3,
+      y: (i % 3) * 5,
+    }));
+
+    const centroidsCount = 3;
+
+    // Create two instances with same iterationCount
+    const kMeans1 = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount, iterationCount: 7 });
+    kMeans1.setNodesData(nodes);
+    await waitForGPUCompletion(gl);
+    const centroids1 = kMeans1.getInitialCentroidsPositionData().slice(0, centroidsCount * 4);
+
+    const kMeans2 = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount, iterationCount: 7 });
+    kMeans2.setNodesData(nodes);
+    await waitForGPUCompletion(gl);
+    const centroids2 = kMeans2.getInitialCentroidsPositionData().slice(0, centroidsCount * 4);
+
+    // They should be identical
+    for (let i = 0; i < centroidsCount * 4; i++) {
+      expect(centroids1[i], `Centroid component ${i} should be identical`).toBe(centroids2[i]);
+    }
+  });
+
+  test<Test>("It should not initialize any two centroids at the same node", async ({ gl }) => {
+    const nodes = Array.from({ length: 30 }, (_, i) => ({
+      x: i * 5,
+      y: i * 2,
+    }));
+
+    const centroidsCount = 5;
+
+    // Test several different iterationCounts
+    for (const iterationCount of [0, 1, 5, 10, 20]) {
+      const kMeans = new KMeansGPU(gl, { nodesCount: nodes.length, centroidsCount, iterationCount });
+      kMeans.setNodesData(nodes);
+      await waitForGPUCompletion(gl);
+      const centroidsData = kMeans.getInitialCentroidsPositionData().slice(0, centroidsCount * 4);
+
+      // Extract positions
+      const positions = [];
+      for (let i = 0; i < centroidsCount; i++) {
+        positions.push({ x: centroidsData[i * 4], y: centroidsData[i * 4 + 1] });
+      }
+
+      // Check for duplicates
+      for (let i = 0; i < centroidsCount; i++) {
+        for (let j = i + 1; j < centroidsCount; j++) {
+          const same = positions[i].x === positions[j].x && positions[i].y === positions[j].y;
+          expect(
+            same,
+            `Centroids ${i} and ${j} should not be at same position (iterationCount=${iterationCount})`,
+          ).toBe(false);
+        }
+      }
+    }
+  });
 });

@@ -40,7 +40,12 @@ export class KMeansGroupedGPU {
 
   constructor(
     gl: WebGL2RenderingContext,
-    { nodesCount, centroidsCount, debug = false }: { nodesCount: number; centroidsCount?: number; debug?: boolean },
+    {
+      nodesCount,
+      centroidsCount,
+      debug = false,
+      iterationCount = 0,
+    }: { nodesCount: number; centroidsCount?: number; debug?: boolean; iterationCount?: number },
   ) {
     this.gl = gl;
     this.nodesCount = nodesCount;
@@ -55,6 +60,7 @@ export class KMeansGroupedGPU {
       nodesCount,
       centroidsCount: this.centroidsCount,
       debug,
+      iterationCount,
     });
 
     // Setup sort program: prepares nodes for sorting by centroid ID
@@ -113,18 +119,26 @@ export class KMeansGroupedGPU {
     WebCLProgram.wirePrograms({ setupSortProgram, offsetProgram });
   }
 
-  public initialize() {
+  public initialize(iterationCount?: number) {
     const { kMeans } = this;
 
     // Initialize centroids
-    kMeans.initialize();
+    kMeans.initialize(iterationCount);
   }
 
-  public compute({ steps }: { steps: number }) {
+  public compute({
+    steps,
+    reinitialize = false,
+    iterationCount,
+  }: {
+    steps: number;
+    reinitialize?: boolean;
+    iterationCount?: number;
+  }) {
     const { kMeans, setupSortProgram, offsetProgram, bitonicSort, debug } = this;
 
     // Run k-means clustering
-    kMeans.compute({ steps });
+    kMeans.compute({ steps, reinitialize, iterationCount });
 
     // Get the closest centroid for each node from k-means output
     setupSortProgram.dataTexturesIndex.closestCentroid.texture = kMeans.getClosestCentroid();

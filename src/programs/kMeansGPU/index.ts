@@ -21,8 +21,9 @@ export class KMeansGPU {
   private nodesCount: number;
   private centroidsCount: number;
   private debug: boolean;
+  private iterationCount: number;
 
-  private initialPositionsProgram: WebCLProgram<"nodesPosition", "centroidsPosition">;
+  private initialPositionsProgram: WebCLProgram<"nodesPosition", "centroidsPosition", "iterationCount">;
   private closestCentroidProgram: WebCLProgram<"nodesPosition" | "centroidsPosition", "closestCentroid">;
   private centroidPositionProgram: WebCLProgram<
     "nodesPosition" | "centroidsPosition" | "closestCentroid",
@@ -31,12 +32,18 @@ export class KMeansGPU {
 
   constructor(
     gl: WebGL2RenderingContext,
-    { nodesCount, centroidsCount, debug = false }: { nodesCount: number; centroidsCount?: number; debug?: boolean },
+    {
+      nodesCount,
+      centroidsCount,
+      debug = false,
+      iterationCount = 0,
+    }: { nodesCount: number; centroidsCount?: number; debug?: boolean; iterationCount?: number },
   ) {
     this.gl = gl;
     this.nodesCount = nodesCount;
     this.centroidsCount = centroidsCount || Math.sqrt(nodesCount);
     this.debug = debug;
+    this.iterationCount = iterationCount;
 
     this.initialPositionsProgram = new WebCLProgram({
       gl,
@@ -114,16 +121,32 @@ export class KMeansGPU {
     WebCLProgram.wirePrograms({ initialPositionsProgram, closestCentroidProgram, centroidPositionProgram });
   }
 
-  public initialize() {
+  public initialize(iterationCount?: number) {
     const { initialPositionsProgram } = this;
 
+    const actualIterationCount = iterationCount ?? this.iterationCount;
+
     initialPositionsProgram.activate();
+    initialPositionsProgram.setUniforms({ iterationCount: actualIterationCount });
     initialPositionsProgram.prepare();
     initialPositionsProgram.compute();
   }
 
-  public compute({ steps }: { steps: number }) {
+  public compute({
+    steps,
+    reinitialize = false,
+    iterationCount,
+  }: {
+    steps: number;
+    reinitialize?: boolean;
+    iterationCount?: number;
+  }) {
     const { closestCentroidProgram, centroidPositionProgram, debug } = this;
+
+    // Reinitialize centroids if requested
+    if (reinitialize) {
+      this.initialize(iterationCount);
+    }
 
     let remainingSteps = steps;
     while (remainingSteps--) {
@@ -156,6 +179,10 @@ export class KMeansGPU {
   // Helper methods for testing:
   public getCentroidsPositionData() {
     return Array.from(this.centroidPositionProgram.getOutput("centroidsPosition"));
+  }
+
+  public getInitialCentroidsPositionData() {
+    return Array.from(this.initialPositionsProgram.getOutput("centroidsPosition"));
   }
 
   public getClosestCentroidData() {
@@ -191,6 +218,7 @@ export class KMeansGPU {
 
     // Initialize centroids by sampling from node positions
     initialPositionsProgram.activate();
+    initialPositionsProgram.setUniforms({ iterationCount: this.iterationCount });
     initialPositionsProgram.prepare();
     initialPositionsProgram.compute();
   }
