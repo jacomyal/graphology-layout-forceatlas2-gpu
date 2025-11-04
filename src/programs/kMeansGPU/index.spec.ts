@@ -42,7 +42,7 @@ describe("K-means GPU Program", () => {
     await waitForGPUCompletion(gl);
 
     const centroidsData = kMeans.getCentroidsPositionData();
-    const centroids = chunk(Array.from(centroidsData.slice(0, centroidsCount * 4)), 4);
+    const centroids = chunk(centroidsData.slice(0, centroidsCount * 4), 4);
 
     // Initial centroids should be sampled from nodes
     centroids.forEach((centroid) => {
@@ -80,7 +80,7 @@ describe("K-means GPU Program", () => {
     await waitForGPUCompletion(gl);
 
     const closestCentroidData = kMeans.getClosestCentroidData();
-    const assignments = Array.from(closestCentroidData.slice(0, nodes.length));
+    const assignments = closestCentroidData.slice(0, nodes.length);
 
     // Each node should be assigned to a centroid
     assignments.forEach((centroidID) => {
@@ -142,10 +142,10 @@ describe("K-means GPU Program", () => {
     await waitForGPUCompletion(gl);
 
     const closestCentroidData = kMeans.getClosestCentroidData();
-    const assignments = Array.from(closestCentroidData.slice(0, nodes.length));
+    const assignments = closestCentroidData.slice(0, nodes.length);
 
     // Count how many nodes are assigned to each centroid
-    const centroidCounts = new Array(centroidsCount).fill(0);
+    const centroidCounts: number[] = new Array(centroidsCount).fill(0);
     assignments.forEach((centroidID) => {
       centroidCounts[centroidID]++;
     });
@@ -184,9 +184,9 @@ describe("K-means GPU Program", () => {
     await waitForGPUCompletion(gl);
 
     const centroidsData = kMeans.getCentroidsPositionData();
-    const centroids = chunk(Array.from(centroidsData.slice(0, centroidsCount * 4)), 4);
+    const centroids = chunk(centroidsData.slice(0, centroidsCount * 4), 4);
     const closestCentroidData = kMeans.getClosestCentroidData();
-    const assignments = Array.from(closestCentroidData.slice(0, nodes.length));
+    const assignments = closestCentroidData.slice(0, nodes.length);
 
     // Find which centroid has the left cluster and which has the right
     const leftCentroidID = assignments[0];
@@ -225,13 +225,13 @@ describe("K-means GPU Program", () => {
     await waitForGPUCompletion(gl);
 
     const closestCentroidData = kMeans.getClosestCentroidData();
-    const assignments = Array.from(closestCentroidData.slice(0, nodes.length));
+    const assignments = closestCentroidData.slice(0, nodes.length);
 
     // Each node should be in its own cluster
     expect(new Set(assignments).size).toBe(3);
 
     const centroidsData = kMeans.getCentroidsPositionData();
-    const centroids = chunk(Array.from(centroidsData.slice(0, centroidsCount * 4)), 4);
+    const centroids = chunk(centroidsData.slice(0, centroidsCount * 4), 4);
 
     // Each centroid should have exactly 1 node
     centroids.forEach((centroid) => {
@@ -259,12 +259,12 @@ describe("K-means GPU Program", () => {
     // Get assignments after 1 step
     kMeans.compute({ steps: 1 });
     await waitForGPUCompletion(gl);
-    const assignments1 = Array.from(kMeans.getClosestCentroidData().slice(0, nodes.length));
+    const assignments1 = kMeans.getClosestCentroidData().slice(0, nodes.length);
 
     // Get assignments after 5 more steps
     kMeans.compute({ steps: 5 });
     await waitForGPUCompletion(gl);
-    const assignments2 = Array.from(kMeans.getClosestCentroidData().slice(0, nodes.length));
+    const assignments2 = kMeans.getClosestCentroidData().slice(0, nodes.length);
 
     // Assignments should stabilize (not change after convergence)
     // For well-separated clusters, 6 total steps should be enough
@@ -291,7 +291,7 @@ describe("K-means GPU Program", () => {
     await waitForGPUCompletion(gl);
 
     const closestCentroidData = kMeans.getClosestCentroidData();
-    const assignments = Array.from(closestCentroidData.slice(0, nodes.length));
+    const assignments = closestCentroidData.slice(0, nodes.length);
 
     // Count unique centroids that have nodes
     const usedCentroids = new Set(assignments);

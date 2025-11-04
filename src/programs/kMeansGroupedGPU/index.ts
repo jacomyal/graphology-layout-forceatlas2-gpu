@@ -280,4 +280,19 @@ export class KMeansGroupedGPU {
     this.validateNodesInCentroids();
     this.validateSortedArrayConsistency();
   }
+
+  public getKMeans() {
+    if (!this.debug) throw new Error('This method "getKMeans" is only available in debug mode.');
+    return this.kMeans;
+  }
+
+  public getOffsetProgram() {
+    if (!this.debug) throw new Error('This method "getOffsetProgram" is only available in debug mode.');
+    return this.offsetProgram;
+  }
+
+  public getBitonicSort() {
+    if (!this.debug) throw new Error('This method "getBitonicSort" is only available in debug mode.');
+    return this.bitonicSort;
+  }
 }

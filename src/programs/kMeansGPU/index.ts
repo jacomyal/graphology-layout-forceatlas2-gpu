@@ -5,7 +5,6 @@ import { getCentroidPositionFragmentShader } from "./fragment-centroid-position"
 import { getClosestCentroidFragmentShader } from "./fragment-closest-centroid";
 import { getCentroidInitialPositionFragmentShader } from "./fragment-initial-centroid-positions";
 
-
 const ATTRIBUTES_PER_ITEM = {
   nodesPosition: 4,
   centroidsPosition: 4,
@@ -132,15 +131,6 @@ export class KMeansGPU {
       closestCentroidProgram.prepare();
       closestCentroidProgram.compute();
 
-      if (debug && remainingSteps === steps - 1) {
-        // Only log on first iteration to avoid spam
-        const assignments = this.getClosestCentroidData();
-        const counts = new Array(this.centroidsCount).fill(0);
-        for (let i = 0; i < this.nodesCount; i++) {
-          counts[assignments[i]]++;
-        }
-      }
-
       centroidPositionProgram.activate();
       centroidPositionProgram.prepare();
       centroidPositionProgram.compute();
@@ -164,12 +154,12 @@ export class KMeansGPU {
   }
 
   // Helper methods for testing:
-  public getCentroidsPositionData(): Float32Array {
-    return this.centroidPositionProgram.getOutput("centroidsPosition");
+  public getCentroidsPositionData() {
+    return Array.from(this.centroidPositionProgram.getOutput("centroidsPosition"));
   }
 
-  public getClosestCentroidData(): Float32Array {
-    return this.closestCentroidProgram.getOutput("closestCentroid");
+  public getClosestCentroidData() {
+    return Array.from(this.closestCentroidProgram.getOutput("closestCentroid"));
   }
 
   public setNodesData(nodes: { x: number; y: number; mass?: number }[]): void {
