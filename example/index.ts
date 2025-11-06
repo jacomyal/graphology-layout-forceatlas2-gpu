@@ -244,7 +244,7 @@ async function init() {
   louvain.assign(graph);
   if (params.startRandom) {
     random.assign(graph, {
-      scale: 1000,
+      scale: 5000,
       center: 0,
     });
   } else {

@@ -15,7 +15,7 @@ export function getClustersGraph(order: number, size: number, clustersCount: num
   let i = 0;
   graph.forEachNode((node, { cluster }) => {
     graph.mergeNodeAttributes(node, {
-      size: graph.degree(node) / 3,
+      size: graph.degree(node) / 3 * 5,
       label: `Node n°${++i}, in cluster n°${cluster}`,
       color: colors[cluster + ""],
     });
