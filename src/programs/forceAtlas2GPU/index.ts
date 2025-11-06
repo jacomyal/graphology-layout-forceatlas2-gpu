@@ -371,10 +371,6 @@ export class ForceAtlas2GPU {
       this.kMeansGrouped.initialize();
       // Run initial clustering to set up all textures
       this.kMeansGrouped.compute({ steps: this.params.repulsion.steps });
-      this.fa2Program.dataTexturesIndex.centroidsPosition.texture = this.kMeansGrouped.getCentroidsPosition();
-      this.fa2Program.dataTexturesIndex.centroidsOffsets.texture = this.kMeansGrouped.getCentroidsOffsets();
-      this.fa2Program.dataTexturesIndex.nodesInCentroids.texture = this.kMeansGrouped.getNodesInCentroids();
-      this.fa2Program.dataTexturesIndex.closestCentroid.texture = this.kMeansGrouped.getClosestCentroid();
     }
 
     this.fa2Program.activate();

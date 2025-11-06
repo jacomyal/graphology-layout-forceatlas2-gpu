@@ -65,7 +65,7 @@ describe("Bitonic Sort GPU Program", () => {
   ];
 
   tests.forEach(([message, count, opts]) => {
-    test<Test>(message, async ({ gl }) => {
+    test<Test>(message, ({ gl }) => {
       const options: Options = { ...DEFAULT_OPTIONS, ...(opts || {}) };
       const length = count;
 
@@ -73,7 +73,7 @@ describe("Bitonic Sort GPU Program", () => {
       const bitonicSort = new BitonicSortGPU(gl, { valuesCount: length, attributesPerItem: options.attributesPerItem });
 
       bitonicSort.setData(sortOn, Math.max(...sortOn) * 2);
-      await bitonicSort.sort();
+      bitonicSort.sort();
 
       expect(bitonicSort.getSortedValues()).toEqual(expectedOutput);
     });

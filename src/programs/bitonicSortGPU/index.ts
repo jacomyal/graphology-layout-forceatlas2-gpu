@@ -1,4 +1,4 @@
-import { getTextureSize } from "../../utils/webgl";
+import { getNextPowerOfTwo, getTextureSize } from "../../utils/webgl";
 import { WebCLProgram } from "../webCLProgram";
 import { getVertexShader } from "../webCLProgram/vertex";
 import { getBitonicSortFragmentShader } from "./fragment";
@@ -19,7 +19,7 @@ export class BitonicSortGPU {
   ) {
     this.gl = gl;
     this.valuesCount = valuesCount;
-    this.extendedValuesCount = 2 ** Math.ceil(Math.log2(valuesCount));
+    this.extendedValuesCount = getNextPowerOfTwo(valuesCount);
     this.textureSize = getTextureSize(this.extendedValuesCount);
     this.attributesPerItem = attributesPerItem;
 

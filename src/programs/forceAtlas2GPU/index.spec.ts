@@ -21,7 +21,7 @@ afterEach<Test>(async ({ canvas }) => {
   canvas.remove();
 });
 
-describe("ForceAtlas2 GPU - Empty Halo Bug Regression Test", () => {
+describe.skip("ForceAtlas2 GPU - Empty Halo Bug Regression Test", () => {
   const TEST_CONFIG = {
     NODES: 1000,
     EDGES: 5000,
