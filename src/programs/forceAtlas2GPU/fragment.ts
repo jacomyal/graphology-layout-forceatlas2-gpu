@@ -66,12 +66,12 @@ uniform sampler2D u_nodesInRegionsTexture;
 uniform sampler2D u_boundariesTexture;
 
 // K-means
-uniform sampler2D u_centroidsPosition;
+uniform sampler2D u_centroidsPositionTexture;
 
 // K-means-grouped
-uniform sampler2D u_centroidsOffsets;
-uniform sampler2D u_nodesInCentroids;
-uniform sampler2D u_closestCentroid;
+uniform sampler2D u_centroidsOffsetsTexture;
+uniform sampler2D u_nodesInCentroidsTexture;
+uniform sampler2D u_closestCentroidTexture;
 
 in vec2 v_textureCoord;
 
@@ -220,7 +220,7 @@ void main() {
   #elif defined(K_MEANS_ENABLED)
     // Node-to-centroid repulsion (k-means):
     for (float j = 0.0; j < K_MEANS_CENTROIDS_COUNT; j++) {
-      vec4 centroidData = getValueInTexture(u_centroidsPosition, j, K_MEANS_CENTROIDS_TEXTURE_SIZE);
+      vec4 centroidData = getValueInTexture(u_centroidsPositionTexture, j, K_MEANS_CENTROIDS_TEXTURE_SIZE);
       vec2 centroidPosition = centroidData.xy;
       float centroidMass = centroidData.z;
 
@@ -239,13 +239,13 @@ void main() {
 
   #elif defined(K_MEANS_GROUPED_ENABLED)
     // Hybrid k-means repulsion with intra-cluster node-to-node:
-    float nodeClosestCentroidID = getValueInTexture(u_closestCentroid, nodeIndex, NODES_TEXTURE_SIZE).x;
+    float nodeClosestCentroidID = getValueInTexture(u_closestCentroidTexture, nodeIndex, NODES_TEXTURE_SIZE).x;
 
     // 1. Inter-cluster: Node-to-centroid repulsion for OTHER centroids
     for (float centroidID = 0.0; centroidID < K_MEANS_CENTROIDS_COUNT; centroidID++) {
       if (centroidID == nodeClosestCentroidID) continue;
 
-      vec4 centroidData = getValueInTexture(u_centroidsPosition, centroidID, K_MEANS_CENTROIDS_TEXTURE_SIZE);
+      vec4 centroidData = getValueInTexture(u_centroidsPositionTexture, centroidID, K_MEANS_CENTROIDS_TEXTURE_SIZE);
       vec2 centroidPosition = centroidData.xy;
       float centroidMass = centroidData.z;
 
@@ -263,12 +263,12 @@ void main() {
     }
 
     // 2. Intra-cluster: Node-to-node repulsion within same centroid
-    vec2 centroidOffset = getValueInTexture(u_centroidsOffsets, nodeClosestCentroidID, K_MEANS_CENTROIDS_TEXTURE_SIZE).xy;
+    vec2 centroidOffset = getValueInTexture(u_centroidsOffsetsTexture, nodeClosestCentroidID, K_MEANS_CENTROIDS_TEXTURE_SIZE).xy;
     float startIndex = centroidOffset.y;
     float endIndex = startIndex + centroidOffset.x;
 
     for (float j = startIndex; j < endIndex; j++) {
-      float otherNodeIndex = getValueInTexture(u_nodesInCentroids, j, SORTED_TEXTURE_SIZE).x;
+      float otherNodeIndex = getValueInTexture(u_nodesInCentroidsTexture, j, SORTED_TEXTURE_SIZE).x;
       if (otherNodeIndex == nodeIndex) continue;
 
       vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
