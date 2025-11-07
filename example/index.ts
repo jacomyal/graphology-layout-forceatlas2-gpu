@@ -1,7 +1,7 @@
 import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
 import { cropToLargestConnectedComponent } from "graphology-components";
-import { circlepack, random } from "graphology-layout";
+import { circlepack, circular, random } from "graphology-layout";
 import FA2LayoutSupervisor from "graphology-layout-forceatlas2/worker";
 import { SerializedGraph } from "graphology-types";
 import { isNil, isNumber, mapValues } from "lodash";
@@ -36,17 +36,18 @@ const BOOLEAN_KEYS = [
   "outboundAttractionDistribution",
   "useFA2GPU",
   "useEuroSIS",
-  "startRandom",
   "debug",
 ] as const;
 const BOOLEAN_KEYS_SET = new Set<string>(BOOLEAN_KEYS);
 type BooleanKey = (typeof BOOLEAN_KEYS)[number];
 
 type RepulsionMode = "all-pairs" | "quad-tree" | "k-means" | "k-means-grouped";
+type InitialPositions = "random" | "circle-packing" | "circle";
 
 type Params = Record<NumberKey, number> &
   Record<BooleanKey, boolean> & {
     repulsionMode: RepulsionMode;
+    initialPositions: InitialPositions;
   };
 
 const DEFAULT_PARAMS: Params = {
@@ -60,7 +61,7 @@ const DEFAULT_PARAMS: Params = {
   outboundAttractionDistribution: false,
   useEuroSIS: false,
   useFA2GPU: true,
-  startRandom: true,
+  initialPositions: "random",
   debug: false,
   repulsionMode: "quad-tree",
   quadTreeDepth: 3,
@@ -78,7 +79,7 @@ type FieldDef =
   | { type: "number"; name: keyof Params; label: string; step?: string; min?: string; section?: boolean }
   | {
       type: "select";
-      name: "repulsionMode";
+      name: "repulsionMode" | "initialPositions";
       label: string;
       options: { value: string; label: string }[];
       section?: boolean;
@@ -91,7 +92,16 @@ const FORM_FIELDS: FieldDef[] = [
   { type: "number", name: "graphClusters", label: "Graph clusters", step: "1", min: "1" },
   { type: "number", name: "graphClusterDensity", label: "Cluster density", step: "0.01", min: "0" },
   { type: "checkbox", name: "useFA2GPU", label: "Use FA2 GPU", section: true },
-  { type: "checkbox", name: "startRandom", label: "Start with random positions" },
+  {
+    type: "select",
+    name: "initialPositions",
+    label: "Initial nodes positions",
+    options: [
+      { value: "random", label: "Random" },
+      { value: "circle-packing", label: "Circle-packing" },
+      { value: "circle", label: "Circle" },
+    ],
+  },
   { type: "checkbox", name: "debug", label: "Enable debug mode (check console)" },
   { type: "number", name: "iterationsPerStep", label: "Iterations per step", step: "1", min: "1" },
   { type: "number", name: "gravity", label: "Gravity", step: "0.001", min: "0" },
@@ -108,8 +118,8 @@ const FORM_FIELDS: FieldDef[] = [
     options: [
       { value: "all-pairs", label: "All pairs (exact, slow)" },
       { value: "quad-tree", label: "Quad-tree (Barnes-Hut)" },
-      { value: "k-means", label: "K-means approximation" },
-      { value: "k-means-grouped", label: "K-means grouped (hybrid)" },
+      { value: "k-means", label: "K-means (node-to-centroid only)" },
+      { value: "k-means-grouped", label: "K-means (node-to-centroid + close node-to-node)" },
     ],
   },
   { type: "number", name: "quadTreeDepth", label: "Tree depth", step: "1", min: "1" },
@@ -178,17 +188,21 @@ function buildForm(form: HTMLFormElement, params: Params) {
   const updateVisibility = () => {
     const data = new FormData(form);
     const useEuroSIS = data.get("useEuroSIS") === "on";
+    const useFA2GPU = data.get("useFA2GPU") === "on";
     const mode = data.get("repulsionMode") as RepulsionMode;
-    const needsTree = mode === "quad-tree";
-    const needsKMeans = mode === "k-means" || mode === "k-means-grouped";
+    const needsTree = mode === "quad-tree" && useFA2GPU;
+    const needsKMeans = (mode === "k-means" || mode === "k-means-grouped") && useFA2GPU;
+    const showAdjustSizes = mode !== "k-means";
 
     const toggle = (name: string, show: boolean) => {
       form.querySelector(`[data-field="${name}"]`)?.classList.toggle("hidden", !show);
     };
 
     ["graphOrder", "graphSize", "graphClusters", "graphClusterDensity"].forEach((f) => toggle(f, !useEuroSIS));
+    toggle("repulsionMode", useFA2GPU);
     ["quadTreeDepth", "quadTreeTheta"].forEach((f) => toggle(f, needsTree));
     ["kMeansCentroids", "kMeansSteps"].forEach((f) => toggle(f, needsKMeans));
+    toggle("adjustSizes", showAdjustSizes);
   };
 
   form.addEventListener("change", updateVisibility);
@@ -199,6 +213,7 @@ function buildForm(form: HTMLFormElement, params: Params) {
     NUMBER_KEYS.forEach((key) => data.get(key) && query.set(key, data.get(key)!.toString()));
     BOOLEAN_KEYS.forEach((key) => query.set(key, String(data.get(key) === "on")));
     query.set("repulsionMode", data.get("repulsionMode")!.toString());
+    query.set("initialPositions", data.get("initialPositions")!.toString());
     window.location.hash = query.toString();
   });
 
@@ -210,7 +225,7 @@ async function init() {
   const params = mapValues(DEFAULT_PARAMS, (v: boolean | number | string, k: string) => {
     const queryValue = query.get(k);
 
-    if (k === "repulsionMode") {
+    if (k === "repulsionMode" || k === "initialPositions") {
       return queryValue || v;
     }
 
@@ -242,15 +257,24 @@ async function init() {
 
   cropToLargestConnectedComponent(graph);
   louvain.assign(graph);
-  if (params.startRandom) {
-    random.assign(graph, {
-      scale: 5000,
-      center: 0,
-    });
-  } else {
-    circlepack.assign(graph, {
-      hierarchyAttributes: ["community"],
-    });
+
+  switch (params.initialPositions) {
+    case "random":
+      random.assign(graph, {
+        scale: 5000,
+        center: 0,
+      });
+      break;
+    case "circle-packing":
+      circlepack.assign(graph, {
+        hierarchyAttributes: ["community"],
+      });
+      break;
+    case "circle":
+      circular.assign(graph, {
+        scale: 5000,
+      });
+      break;
   }
 
   const container = document.getElementById("stage") as HTMLDivElement;
