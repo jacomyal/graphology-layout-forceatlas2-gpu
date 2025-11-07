@@ -417,15 +417,42 @@ async function init() {
   const counter = countStepsPerSecond(graph, params.useFA2GPU ? params.iterationsPerStep : 1);
   if (counter.dom) document.body.append(counter.dom);
 
+  // Function to reinitialize node positions
+  const reinitializePositions = () => {
+    switch (params.initialPositions) {
+      case "random":
+        random.assign(graph, {
+          scale: 5000,
+          center: 0,
+        });
+        break;
+      case "circle-packing":
+        circlepack.assign(graph, {
+          hierarchyAttributes: ["community"],
+        });
+        break;
+      case "circle":
+        circular.assign(graph, {
+          scale: 5000,
+        });
+        break;
+    }
+  };
+
   // Add toggle button:
   const toggleButton = document.getElementById("toggle-fa2") as HTMLButtonElement;
+  let hasStarted = false;
   toggleButton.addEventListener("click", () => {
     if (fa2.isRunning()) {
       fa2.stop();
       counter.pause();
+      toggleButton.textContent = hasStarted ? "Restart layout" : "Start layout";
     } else {
-      fa2.start(1000);
+      reinitializePositions();
       counter.reset();
+      fa2.start(1000);
+      toggleButton.textContent = "Stop layout";
+      hasStarted = true;
     }
   });
 

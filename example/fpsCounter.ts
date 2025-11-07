@@ -1,46 +1,86 @@
 import Graph from "graphology";
 
-const UNIT = "fa2/second";
-
 export function countStepsPerSecond(graph: Graph, stepsPerSync: number = 1) {
   let isKilled = false;
   let isPaused = false;
   let t0 = Date.now();
-  let renders = 0;
+  let totalSteps = 0;
+  let totalRunningTime = 0; // in milliseconds
+  let currentSessionSteps = 0;
 
   const onRender = () => {
-    if (isKilled) return;
-    renders++;
+    if (isKilled || isPaused) return;
+    currentSessionSteps++;
   };
   graph.on("eachNodeAttributesUpdated", onRender);
 
   const refreshDisplay = () => {
-    const rps = (renders / (Date.now() - t0)) * 1000 * stepsPerSync;
-    dom.innerHTML =
-      (isPaused || isNaN(rps) ? "-" : rps.toLocaleString("en-US", { maximumFractionDigits: 1 })) + " " + UNIT;
+    if (isPaused) {
+      // When paused, show frozen values
+      const avgRate = totalRunningTime > 0 ? (totalSteps / totalRunningTime) * 1000 : 0;
+      dom.innerHTML = `
+        <div>Total steps: ${totalSteps.toLocaleString("en-US")}</div>
+        <div>Total time: ${(totalRunningTime / 1000).toLocaleString("en-US", { maximumFractionDigits: 2 })}s</div>
+        <div>Avg rate: ${avgRate.toLocaleString("en-US", { maximumFractionDigits: 1 })} fa2/second</div>
+      `;
+    } else {
+      // When running, calculate current values
+      const elapsed = Date.now() - t0;
+      const currentTotalSteps = totalSteps + currentSessionSteps * stepsPerSync;
+      const currentTotalTime = totalRunningTime + elapsed;
+      const avgRate = currentTotalTime > 0 ? (currentTotalSteps / currentTotalTime) * 1000 : 0;
+
+      dom.innerHTML = `
+        <div>Total steps: ${currentTotalSteps.toLocaleString("en-US")}</div>
+        <div>Total time: ${(currentTotalTime / 1000).toLocaleString("en-US", { maximumFractionDigits: 2 })}s</div>
+        <div>Avg rate: ${avgRate.toLocaleString("en-US", { maximumFractionDigits: 1 })} fa2/second</div>
+      `;
+    }
   };
 
   const dom = document.createElement("div") as HTMLDivElement;
   dom.classList.add("rps-counter");
-  dom.innerHTML = `- ${UNIT}`;
-  const intervalID = setInterval(refreshDisplay, 1000);
+  dom.innerHTML = `
+    <div>Total steps: 0</div>
+    <div>Total time: 0.00s</div>
+    <div>Avg rate: 0.0 fa2/second</div>
+  `;
+
+  // Use requestAnimationFrame for smoother, more frequent updates
+  let animationFrameID: number;
+  const animationLoop = () => {
+    if (!isKilled) {
+      refreshDisplay();
+      animationFrameID = requestAnimationFrame(animationLoop);
+    }
+  };
+  animationFrameID = requestAnimationFrame(animationLoop);
 
   const res: { dom: HTMLElement | null; reset: () => void; pause: () => void; clean: () => void } = {
     dom,
     reset: () => {
       t0 = Date.now();
-      renders = 0;
+      totalSteps = 0;
+      totalRunningTime = 0;
+      currentSessionSteps = 0;
       isPaused = false;
       refreshDisplay();
     },
     pause: () => {
-      isPaused = true;
-      refreshDisplay();
+      if (!isPaused) {
+        // Accumulate the current session before pausing
+        const elapsed = Date.now() - t0;
+        totalSteps += currentSessionSteps * stepsPerSync;
+        totalRunningTime += elapsed;
+        currentSessionSteps = 0;
+        isPaused = true;
+        refreshDisplay();
+      }
     },
     clean: () => {
       if (isKilled) return;
       graph.off("eachNodeAttributesUpdated", onRender);
-      clearInterval(intervalID);
+      cancelAnimationFrame(animationFrameID);
       dom.remove();
       res.dom = null;
       isKilled = true;
