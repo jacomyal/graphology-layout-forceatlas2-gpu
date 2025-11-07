@@ -11,7 +11,44 @@ import { ForceAtlas2GPU, ForceAtlas2Graph } from "../src";
 import { ForceAtlas2Settings } from "../src/programs/forceAtlas2GPU/consts";
 import { countStepsPerSecond } from "./fpsCounter";
 import { getClustersGraph } from "./getClustersGraph";
-import data from "./public/eurosis.json";
+import arcticData from "./public/arctic.json";
+import celegansData from "./public/celegans.json";
+import eurosisData from "./public/eurosis.json";
+import yeastData from "./public/yeast.json";
+
+type DatasetConfig = {
+  name: string;
+  order: number;
+  size: number;
+  loader: () => Promise<Graph>;
+};
+
+const DATASETS: Record<string, DatasetConfig> = {
+  arctic: {
+    name: "Arctic",
+    order: 0,
+    size: 0,
+    loader: async () => Graph.from(arcticData as unknown as SerializedGraph),
+  },
+  celegans: {
+    name: "C. elegans",
+    order: 0,
+    size: 0,
+    loader: async () => Graph.from(celegansData as unknown as SerializedGraph),
+  },
+  eurosis: {
+    name: "EuroSIS",
+    order: 0,
+    size: 0,
+    loader: async () => Graph.from(eurosisData as unknown as SerializedGraph),
+  },
+  yeast: {
+    name: "Yeast",
+    order: 0,
+    size: 0,
+    loader: async () => Graph.from(yeastData as unknown as SerializedGraph),
+  },
+};
 
 const NUMBER_KEYS = [
   "iterationsPerStep",
@@ -35,7 +72,6 @@ const BOOLEAN_KEYS = [
   "linLogMode",
   "outboundAttractionDistribution",
   "useFA2GPU",
-  "useEuroSIS",
   "debug",
 ] as const;
 const BOOLEAN_KEYS_SET = new Set<string>(BOOLEAN_KEYS);
@@ -48,6 +84,7 @@ type Params = Record<NumberKey, number> &
   Record<BooleanKey, boolean> & {
     repulsionMode: RepulsionMode;
     initialPositions: InitialPositions;
+    dataset: string;
   };
 
 const DEFAULT_PARAMS: Params = {
@@ -59,7 +96,7 @@ const DEFAULT_PARAMS: Params = {
   adjustSizes: false,
   linLogMode: false,
   outboundAttractionDistribution: false,
-  useEuroSIS: false,
+  dataset: "random",
   useFA2GPU: true,
   initialPositions: "random",
   debug: false,
@@ -79,14 +116,37 @@ type FieldDef =
   | { type: "number"; name: keyof Params; label: string; step?: string; min?: string; section?: boolean }
   | {
       type: "select";
-      name: "repulsionMode" | "initialPositions";
+      name: "repulsionMode" | "initialPositions" | "dataset";
       label: string;
       options: { value: string; label: string }[];
       section?: boolean;
     };
 
+async function initializeDatasets() {
+  const promises = Object.entries(DATASETS).map(async ([key, config]) => {
+    try {
+      const graph = await config.loader();
+      config.order = graph.order;
+      config.size = graph.size;
+    } catch (error) {
+      console.error(`Failed to load dataset ${key}:`, error);
+    }
+  });
+  await Promise.all(promises);
+}
+
+function getDatasetOptions(): { value: string; label: string }[] {
+  const options = [{ value: "random", label: "Random graph" }];
+  Object.entries(DATASETS)
+    .sort(([, a], [, b]) => a.name.localeCompare(b.name))
+    .forEach(([key, config]) => {
+      const label = `${config.name} (${config.order.toLocaleString()} nodes, ${config.size.toLocaleString()} edges)`;
+      options.push({ value: key, label });
+    });
+  return options;
+}
+
 const FORM_FIELDS: FieldDef[] = [
-  { type: "checkbox", name: "useEuroSIS", label: "Use EuroSIS dataset" },
   { type: "number", name: "graphOrder", label: "Graph nodes", step: "1", min: "10" },
   { type: "number", name: "graphSize", label: "Graph edges", step: "1", min: "10" },
   { type: "number", name: "graphClusters", label: "Graph clusters", step: "1", min: "1" },
@@ -131,6 +191,26 @@ const FORM_FIELDS: FieldDef[] = [
 function buildForm(form: HTMLFormElement, params: Params) {
   form.innerHTML = "";
   let currentSection: HTMLElement = form;
+
+  // Add dataset select
+  const datasetGroup = document.createElement("div");
+  datasetGroup.className = "form-group";
+  datasetGroup.dataset.field = "dataset";
+  const datasetLabel = document.createElement("label");
+  datasetLabel.htmlFor = "dataset";
+  datasetLabel.textContent = "Dataset";
+  const datasetSelect = document.createElement("select");
+  datasetSelect.name = "dataset";
+  datasetSelect.id = "dataset";
+  getDatasetOptions().forEach((opt) => {
+    const option = document.createElement("option");
+    option.value = opt.value;
+    option.textContent = opt.label;
+    option.selected = opt.value === params.dataset;
+    datasetSelect.appendChild(option);
+  });
+  datasetGroup.append(datasetLabel, datasetSelect);
+  currentSection.appendChild(datasetGroup);
 
   FORM_FIELDS.forEach((field) => {
     if (field.section) {
@@ -187,7 +267,8 @@ function buildForm(form: HTMLFormElement, params: Params) {
 
   const updateVisibility = () => {
     const data = new FormData(form);
-    const useEuroSIS = data.get("useEuroSIS") === "on";
+    const dataset = data.get("dataset") as string;
+    const useRandomGraph = dataset === "random";
     const useFA2GPU = data.get("useFA2GPU") === "on";
     const mode = data.get("repulsionMode") as RepulsionMode;
     const needsTree = mode === "quad-tree" && useFA2GPU;
@@ -198,7 +279,7 @@ function buildForm(form: HTMLFormElement, params: Params) {
       form.querySelector(`[data-field="${name}"]`)?.classList.toggle("hidden", !show);
     };
 
-    ["graphOrder", "graphSize", "graphClusters", "graphClusterDensity"].forEach((f) => toggle(f, !useEuroSIS));
+    ["graphOrder", "graphSize", "graphClusters", "graphClusterDensity"].forEach((f) => toggle(f, useRandomGraph));
     toggle("repulsionMode", useFA2GPU);
     ["quadTreeDepth", "quadTreeTheta"].forEach((f) => toggle(f, needsTree));
     ["kMeansCentroids", "kMeansSteps"].forEach((f) => toggle(f, needsKMeans));
@@ -214,6 +295,7 @@ function buildForm(form: HTMLFormElement, params: Params) {
     BOOLEAN_KEYS.forEach((key) => query.set(key, String(data.get(key) === "on")));
     query.set("repulsionMode", data.get("repulsionMode")!.toString());
     query.set("initialPositions", data.get("initialPositions")!.toString());
+    query.set("dataset", data.get("dataset")!.toString());
     window.location.hash = query.toString();
   });
 
@@ -221,11 +303,14 @@ function buildForm(form: HTMLFormElement, params: Params) {
 }
 
 async function init() {
+  // Initialize datasets metadata
+  await initializeDatasets();
+
   const query = new URLSearchParams(window.location.hash.replace(/^[#?]+/, ""));
   const params = mapValues(DEFAULT_PARAMS, (v: boolean | number | string, k: string) => {
     const queryValue = query.get(k);
 
-    if (k === "repulsionMode" || k === "initialPositions") {
+    if (k === "repulsionMode" || k === "initialPositions" || k === "dataset") {
       return queryValue || v;
     }
 
@@ -249,10 +334,20 @@ async function init() {
   });
 
   let graph: Graph;
-  if (params.useEuroSIS) {
-    graph = Graph.from(data as unknown as SerializedGraph);
-  } else {
+  if (params.dataset === "random") {
     graph = getClustersGraph(params.graphOrder, params.graphSize, params.graphClusters, params.graphClusterDensity);
+  } else {
+    const dataset = DATASETS[params.dataset];
+    if (dataset) {
+      graph = await dataset.loader();
+      // Override node sizes to match random graph formula
+      graph.forEachNode((node) => {
+        graph.setNodeAttribute(node, "size", (graph.degree(node) / 3) * 5);
+      });
+    } else {
+      // Fallback to random graph if dataset not found
+      graph = getClustersGraph(params.graphOrder, params.graphSize, params.graphClusters, params.graphClusterDensity);
+    }
   }
 
   cropToLargestConnectedComponent(graph);
