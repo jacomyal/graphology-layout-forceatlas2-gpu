@@ -48,7 +48,7 @@ ${adjustSizes ? "#define ADJUST_SIZES" : ""}
 ${strongGravityMode ? "#define STRONG_GRAVITY_MODE" : ""}
 ${outboundAttractionDistribution ? "#define OUTBOUND_ATTRACTION_DISTRIBUTION" : ""}
 ${repulsion.type === "quad-tree" ? "#define QUAD_TREE_ENABLED" : ""}
-${repulsion.type === "k-means" ? "#define K_MEANS_ENABLED" : ""}
+${repulsion.type === "k-means" && !repulsion.nodeToNodeRepulsion ? "#define K_MEANS_ENABLED" : ""}
 ${repulsion.type === "k-means" && repulsion.nodeToNodeRepulsion ? "#define K_MEANS_GROUPED_ENABLED" : ""}
 
 // Graph data
