@@ -1,0 +1,119 @@
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html,
+      body {
+        font-family: sans-serif;
+        font-size: 0.9em;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        align-items: stretch;
+      }
+      #stage {
+        background: #eeeeee;
+        flex-grow: 1;
+      }
+      #controls {
+        padding: 15px;
+        background: #ffffff;
+        overflow-y: auto;
+        width: 400px;
+        max-width: 100%;
+      }
+      #controls form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      #controls h3 {
+        margin: 0 0 10px 0;
+        font-size: 1.1em;
+      }
+      .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .form-group label {
+        font-weight: 600;
+        font-size: 0.9em;
+      }
+      .form-group input[type="number"],
+      .form-group select {
+        padding: 4px 6px;
+        border: 1px solid #ccc;
+        border-radius: 3px;
+      }
+      .form-group input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+      }
+      .form-group.checkbox {
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+      }
+      .form-group.checkbox label {
+        margin: 0;
+      }
+      .form-group.hidden {
+        display: none;
+      }
+      .form-section {
+        border-top: 1px solid #ddd;
+        padding-top: 12px;
+        margin-top: 4px;
+      }
+      button[type="submit"] {
+        position: static;
+        margin: 10px 0 0 0;
+        padding: 8px 12px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button[type="submit"]:hover {
+        background: #0056b3;
+      }
+      .rps-counter {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        padding: 10px;
+        color: darkred;
+        background: #ffffff99;
+        font-size: 0.9em;
+        line-height: 1.4;
+      }
+      .rps-counter div {
+        margin: 2px 0;
+      }
+      button {
+        position: absolute;
+        top: 0;
+        right: 0;
+        margin: 10px;
+        padding: 5px;
+        background: white;
+        z-index: 2;
+      }
+    </style>
+    <title>ForceAtlas2 GPU/CPU Playground</title>
+    <script type="module" crossorigin src="/graphology-layout-forceatlas2-gpu/assets/index-Dgel47R6.js"></script>
+  </head>
+  <body>
+    <div id="controls">
+      <h3>ForceAtlas2 GPU/CPU Playground</h3>
+      <form id="settings-form"></form>
+    </div>
+    <div id="stage"></div>
+    <button type="button" id="toggle-fa2">Start layout</button>
+  </body>
+</html>
