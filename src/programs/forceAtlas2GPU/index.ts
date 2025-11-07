@@ -74,9 +74,9 @@ export class ForceAtlas2GPU {
     | "closestCentroid",
     "nodesPosition" | "nodesMovement"
   >;
-  private quadTree: QuadTreeGPU;
-  private kMeans: KMeansGPU;
-  private kMeansGrouped: KMeansGroupedGPU;
+  private quadTree?: QuadTreeGPU;
+  private kMeans?: KMeansGPU;
+  private kMeansGrouped?: KMeansGroupedGPU;
 
   constructor(graph: ForceAtlas2Graph, params: Partial<ForceAtlas2Settings> = {}) {
     // Initialize data:
@@ -90,7 +90,7 @@ export class ForceAtlas2GPU {
     const { repulsion } = this.params;
     if (repulsion.type === "quad-tree") {
       if (repulsion.depth < 1 || repulsion.depth > 4) throw new Error("Quad-tree depth must be 1, 2, 3 or 4");
-    } else if (repulsion.type === "k-means" || repulsion.type === "k-means-grouped") {
+    } else if (repulsion.type === "k-means") {
       if (repulsion.centroids < 1) throw new Error("K-means must have at least 1 centroid");
       if (repulsion.steps < 1) throw new Error("K-means must have at least 1 step");
     }
@@ -114,8 +114,7 @@ export class ForceAtlas2GPU {
     // Initialize programs:
     const quadTreeDepth = repulsion.type === "quad-tree" ? repulsion.depth : 1;
     const quadTreeRegionsCount = repulsion.type === "quad-tree" ? getRegionsCount(repulsion.depth) : 1;
-    const kMeansCentroidsCount =
-      repulsion.type === "k-means" || repulsion.type === "k-means-grouped" ? repulsion.centroids : 1;
+    const kMeansCentroidsCount = repulsion.type === "k-means" ? repulsion.centroids : 1;
     this.fa2Program = new WebCLProgram({
       gl,
       name: "ForceAtlas2",
@@ -161,31 +160,33 @@ export class ForceAtlas2GPU {
       ],
     });
 
-    this.quadTree = new QuadTreeGPU(this.gl, { nodesCount: graph.order }, { depth: quadTreeDepth });
-    this.kMeans = new KMeansGPU(this.gl, {
-      nodesCount: graph.order,
-      centroidsCount: kMeansCentroidsCount,
-      debug: this.params.debug,
-    });
-    this.kMeansGrouped = new KMeansGroupedGPU(this.gl, {
-      nodesCount: graph.order,
-      centroidsCount: kMeansCentroidsCount,
-      debug: this.params.debug,
-    });
-
+    // Initialize only the repulsion method that's needed:
     if (repulsion.type === "quad-tree") {
+      this.quadTree = new QuadTreeGPU(this.gl, { nodesCount: graph.order }, { depth: quadTreeDepth });
       this.fa2Program.dataTexturesIndex.nodesRegions.texture = this.quadTree.getNodesRegionsTexture();
       this.fa2Program.dataTexturesIndex.regionsBarycenters.texture = this.quadTree.getRegionsBarycentersTexture();
       this.fa2Program.dataTexturesIndex.regionsOffsets.texture = this.quadTree.getRegionsOffsetsTexture();
       this.fa2Program.dataTexturesIndex.nodesInRegions.texture = this.quadTree.getNodesInRegionsTexture();
       this.fa2Program.dataTexturesIndex.boundaries.texture = this.quadTree.getBoundariesTexture();
     } else if (repulsion.type === "k-means") {
-      this.fa2Program.dataTexturesIndex.centroidsPosition.texture = this.kMeans.getCentroidsPosition();
-    } else if (repulsion.type === "k-means-grouped") {
-      this.fa2Program.dataTexturesIndex.centroidsPosition.texture = this.kMeansGrouped.getCentroidsPosition();
-      this.fa2Program.dataTexturesIndex.centroidsOffsets.texture = this.kMeansGrouped.getCentroidsOffsets();
-      this.fa2Program.dataTexturesIndex.nodesInCentroids.texture = this.kMeansGrouped.getNodesInCentroids();
-      this.fa2Program.dataTexturesIndex.closestCentroid.texture = this.kMeansGrouped.getClosestCentroid();
+      if (repulsion.nodeToNodeRepulsion) {
+        this.kMeansGrouped = new KMeansGroupedGPU(this.gl, {
+          nodesCount: graph.order,
+          centroidsCount: kMeansCentroidsCount,
+          debug: this.params.debug,
+        });
+        this.fa2Program.dataTexturesIndex.centroidsPosition.texture = this.kMeansGrouped.getCentroidsPosition();
+        this.fa2Program.dataTexturesIndex.centroidsOffsets.texture = this.kMeansGrouped.getCentroidsOffsets();
+        this.fa2Program.dataTexturesIndex.nodesInCentroids.texture = this.kMeansGrouped.getNodesInCentroids();
+        this.fa2Program.dataTexturesIndex.closestCentroid.texture = this.kMeansGrouped.getClosestCentroid();
+      } else {
+        this.kMeans = new KMeansGPU(this.gl, {
+          nodesCount: graph.order,
+          centroidsCount: kMeansCentroidsCount,
+          debug: this.params.debug,
+        });
+        this.fa2Program.dataTexturesIndex.centroidsPosition.texture = this.kMeans.getCentroidsPosition();
+      }
     }
   }
 
@@ -288,7 +289,7 @@ export class ForceAtlas2GPU {
   }
 
   private step() {
-    const { quadTree, kMeans, kMeansGrouped, fa2Program, params } = this;
+    const { fa2Program, params } = this;
     const { iterationsPerStep, repulsion } = params;
 
     let remainingIterations = iterationsPerStep;
@@ -301,24 +302,25 @@ export class ForceAtlas2GPU {
 
       // Compute additional repulsion structures if needed:
       if (repulsion.type === "quad-tree") {
-        quadTree.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
-        quadTree.compute();
+        this.quadTree!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
+        this.quadTree!.compute();
         fa2Program.activate();
       } else if (repulsion.type === "k-means") {
-        kMeans.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
-        kMeans.compute({
-          steps: repulsion.steps,
-          reinitialize: repulsion.reinitialize ?? true,
-          iterationCount: this.totalIterations,
-        });
-        fa2Program.activate();
-      } else if (repulsion.type === "k-means-grouped") {
-        kMeansGrouped.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
-        kMeansGrouped.compute({
-          steps: repulsion.steps,
-          reinitialize: repulsion.reinitialize ?? true,
-          iterationCount: this.totalIterations,
-        });
+        if (repulsion.nodeToNodeRepulsion) {
+          this.kMeansGrouped!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
+          this.kMeansGrouped!.compute({
+            steps: repulsion.steps,
+            reinitialize: repulsion.resetCentroids,
+            iterationCount: this.totalIterations,
+          });
+        } else {
+          this.kMeans!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
+          this.kMeans!.compute({
+            steps: repulsion.steps,
+            reinitialize: repulsion.resetCentroids,
+            iterationCount: this.totalIterations,
+          });
+        }
         fa2Program.activate();
       }
 
@@ -360,17 +362,19 @@ export class ForceAtlas2GPU {
 
     if (this.params.repulsion.type === "quad-tree") {
       // Wire nodes texture BEFORE initializing
-      this.quadTree.wireTextures(this.fa2Program.dataTexturesIndex.nodesPosition.texture);
+      this.quadTree!.wireTextures(this.fa2Program.dataTexturesIndex.nodesPosition.texture);
     } else if (this.params.repulsion.type === "k-means") {
-      // Wire nodes texture and initialize centroids
-      this.kMeans.wireTextures(this.fa2Program.dataTexturesIndex.nodesPosition.texture);
-      this.kMeans.initialize();
-    } else if (this.params.repulsion.type === "k-means-grouped") {
-      // Wire nodes texture and initialize centroids
-      this.kMeansGrouped.wireTextures(this.fa2Program.dataTexturesIndex.nodesPosition.texture);
-      this.kMeansGrouped.initialize();
-      // Run initial clustering to set up all textures
-      this.kMeansGrouped.compute({ steps: this.params.repulsion.steps });
+      if (this.params.repulsion.nodeToNodeRepulsion) {
+        // Wire nodes texture and initialize centroids
+        this.kMeansGrouped!.wireTextures(this.fa2Program.dataTexturesIndex.nodesPosition.texture);
+        this.kMeansGrouped!.initialize();
+        // Run initial clustering to set up all textures
+        this.kMeansGrouped!.compute({ steps: this.params.repulsion.steps });
+      } else {
+        // Wire nodes texture and initialize centroids
+        this.kMeans!.wireTextures(this.fa2Program.dataTexturesIndex.nodesPosition.texture);
+        this.kMeans!.initialize();
+      }
     }
 
     this.fa2Program.activate();
@@ -395,11 +399,26 @@ export class ForceAtlas2GPU {
   }
 
   // Debug methods
-  public getKMeans() {
+  public getKMeans(): KMeansGPU {
+    if (!this.kMeans) {
+      throw new Error('KMeansGPU is not initialized. Use repulsion type "k-means" to enable it.');
+    }
     return this.kMeans;
   }
 
-  public getKMeansGrouped() {
+  public getKMeansGrouped(): KMeansGroupedGPU {
+    if (!this.kMeansGrouped) {
+      throw new Error(
+        'KMeansGroupedGPU is not initialized. Use repulsion type "k-means" with nodeToNodeRepulsion: true to enable it.',
+      );
+    }
     return this.kMeansGrouped;
+  }
+
+  public getQuadTree(): QuadTreeGPU {
+    if (!this.quadTree) {
+      throw new Error('QuadTreeGPU is not initialized. Use repulsion type "quad-tree" to enable it.');
+    }
+    return this.quadTree;
   }
 }

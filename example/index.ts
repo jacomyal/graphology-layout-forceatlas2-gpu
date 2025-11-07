@@ -73,11 +73,13 @@ const BOOLEAN_KEYS = [
   "outboundAttractionDistribution",
   "useFA2GPU",
   "debug",
+  "kMeansNodeToNodeRepulsion",
+  "kMeansReinitialize",
 ] as const;
 const BOOLEAN_KEYS_SET = new Set<string>(BOOLEAN_KEYS);
 type BooleanKey = (typeof BOOLEAN_KEYS)[number];
 
-type RepulsionMode = "all-pairs" | "quad-tree" | "k-means" | "k-means-grouped";
+type RepulsionMode = "all-pairs" | "quad-tree" | "k-means";
 type InitialPositions = "random" | "circle-packing" | "circle";
 
 type Params = Record<NumberKey, number> &
@@ -105,6 +107,8 @@ const DEFAULT_PARAMS: Params = {
   quadTreeTheta: 0.5,
   kMeansCentroids: 100,
   kMeansSteps: 1,
+  kMeansNodeToNodeRepulsion: false,
+  kMeansReinitialize: true,
   graphOrder: 10000,
   graphSize: 50000,
   graphClusters: 5,
@@ -178,14 +182,15 @@ const FORM_FIELDS: FieldDef[] = [
     options: [
       { value: "all-pairs", label: "All pairs (exact, slow)" },
       { value: "quad-tree", label: "Quad-tree (Barnes-Hut)" },
-      { value: "k-means", label: "K-means (node-to-centroid only)" },
-      { value: "k-means-grouped", label: "K-means (node-to-centroid + close node-to-node)" },
+      { value: "k-means", label: "K-means" },
     ],
   },
   { type: "number", name: "quadTreeDepth", label: "Tree depth", step: "1", min: "1" },
   { type: "number", name: "quadTreeTheta", label: "Tree theta", step: "0.1", min: "0" },
   { type: "number", name: "kMeansCentroids", label: "K-means centroids", step: "1", min: "1" },
   { type: "number", name: "kMeansSteps", label: "K-means steps", step: "1", min: "1" },
+  { type: "checkbox", name: "kMeansNodeToNodeRepulsion", label: "Node-to-node repulsion" },
+  { type: "checkbox", name: "kMeansReinitialize", label: "Reinitialize centroids every steps" },
 ];
 
 function buildForm(form: HTMLFormElement, params: Params) {
@@ -272,7 +277,7 @@ function buildForm(form: HTMLFormElement, params: Params) {
     const useFA2GPU = data.get("useFA2GPU") === "on";
     const mode = data.get("repulsionMode") as RepulsionMode;
     const needsTree = mode === "quad-tree" && useFA2GPU;
-    const needsKMeans = (mode === "k-means" || mode === "k-means-grouped") && useFA2GPU;
+    const needsKMeans = mode === "k-means" && useFA2GPU;
     const showAdjustSizes = mode !== "k-means";
 
     const toggle = (name: string, show: boolean) => {
@@ -282,7 +287,9 @@ function buildForm(form: HTMLFormElement, params: Params) {
     ["graphOrder", "graphSize", "graphClusters", "graphClusterDensity"].forEach((f) => toggle(f, useRandomGraph));
     toggle("repulsionMode", useFA2GPU);
     ["quadTreeDepth", "quadTreeTheta"].forEach((f) => toggle(f, needsTree));
-    ["kMeansCentroids", "kMeansSteps"].forEach((f) => toggle(f, needsKMeans));
+    ["kMeansCentroids", "kMeansSteps", "kMeansNodeToNodeRepulsion", "kMeansReinitialize"].forEach((f) =>
+      toggle(f, needsKMeans),
+    );
     toggle("adjustSizes", showAdjustSizes);
   };
 
@@ -381,9 +388,13 @@ async function init() {
   const getRepulsionConfig = (): ForceAtlas2Settings["repulsion"] => {
     switch (params.repulsionMode) {
       case "k-means":
-        return { type: "k-means", centroids: params.kMeansCentroids, steps: params.kMeansSteps };
-      case "k-means-grouped":
-        return { type: "k-means-grouped", centroids: params.kMeansCentroids, steps: params.kMeansSteps };
+        return {
+          type: "k-means",
+          centroids: params.kMeansCentroids,
+          steps: params.kMeansSteps,
+          nodeToNodeRepulsion: params.kMeansNodeToNodeRepulsion,
+          resetCentroids: params.kMeansReinitialize,
+        };
       case "quad-tree":
         return { type: "quad-tree", depth: params.quadTreeDepth, theta: params.quadTreeTheta };
       default:

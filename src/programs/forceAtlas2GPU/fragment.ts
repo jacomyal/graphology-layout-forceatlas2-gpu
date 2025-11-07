@@ -27,8 +27,7 @@ export function getForceAtlas2FragmentShader({
 } & ForceAtlas2Settings) {
   const quadTreeDepth = repulsion.type === "quad-tree" ? repulsion.depth : 1;
   const quadTreeTheta = repulsion.type === "quad-tree" ? repulsion.theta : 0;
-  const kMeansCentroids =
-    repulsion.type === "k-means" || repulsion.type === "k-means-grouped" ? repulsion.centroids : 1;
+  const kMeansCentroids = repulsion.type === "k-means" ? repulsion.centroids : 1;
 
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
@@ -50,7 +49,7 @@ ${strongGravityMode ? "#define STRONG_GRAVITY_MODE" : ""}
 ${outboundAttractionDistribution ? "#define OUTBOUND_ATTRACTION_DISTRIBUTION" : ""}
 ${repulsion.type === "quad-tree" ? "#define QUAD_TREE_ENABLED" : ""}
 ${repulsion.type === "k-means" ? "#define K_MEANS_ENABLED" : ""}
-${repulsion.type === "k-means-grouped" ? "#define K_MEANS_GROUPED_ENABLED" : ""}
+${repulsion.type === "k-means" && repulsion.nodeToNodeRepulsion ? "#define K_MEANS_GROUPED_ENABLED" : ""}
 
 // Graph data
 uniform sampler2D u_nodesPositionTexture;
