@@ -41,9 +41,19 @@ export class KMeansGPU {
   ) {
     this.gl = gl;
     this.nodesCount = nodesCount;
-    this.centroidsCount = centroidsCount || Math.sqrt(nodesCount);
+    this.centroidsCount = centroidsCount ?? Math.sqrt(nodesCount);
     this.debug = debug;
     this.iterationCount = iterationCount;
+
+    // Validate centroids count
+    if (this.centroidsCount <= 0) {
+      throw new Error(`Invalid centroidsCount: ${this.centroidsCount}. Must be greater than 0.`);
+    }
+    if (this.centroidsCount > this.nodesCount) {
+      throw new Error(
+        `Invalid centroidsCount: ${this.centroidsCount}. Cannot have more centroids than nodes (${this.nodesCount}).`,
+      );
+    }
 
     this.initialPositionsProgram = new WebCLProgram({
       gl,
@@ -161,7 +171,7 @@ export class KMeansGPU {
       if (remainingSteps) {
         centroidPositionProgram.swapTextures("centroidsPosition", "centroidsPosition");
         closestCentroidProgram.dataTexturesIndex.centroidsPosition.texture =
-          centroidPositionProgram.outputTexturesIndex.centroidsPosition.texture;
+          centroidPositionProgram.dataTexturesIndex.centroidsPosition.texture;
       }
     }
 
