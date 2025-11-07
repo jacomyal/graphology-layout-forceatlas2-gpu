@@ -306,20 +306,23 @@ export class ForceAtlas2GPU {
         this.quadTree!.compute();
         fa2Program.activate();
       } else if (repulsion.type === "k-means") {
-        if (repulsion.nodeToNodeRepulsion) {
-          this.kMeansGrouped!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
-          this.kMeansGrouped!.compute({
-            steps: repulsion.steps,
-            reinitialize: repulsion.resetCentroids,
-            iterationCount: this.totalIterations,
-          });
-        } else {
-          this.kMeans!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
-          this.kMeans!.compute({
-            steps: repulsion.steps,
-            reinitialize: repulsion.resetCentroids,
-            iterationCount: this.totalIterations,
-          });
+        // Only recompute centroids based on centroidUpdateInterval
+        if (this.totalIterations % repulsion.centroidUpdateInterval === 0) {
+          if (repulsion.nodeToNodeRepulsion) {
+            this.kMeansGrouped!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
+            this.kMeansGrouped!.compute({
+              steps: repulsion.steps,
+              reinitialize: repulsion.resetCentroids,
+              iterationCount: this.totalIterations,
+            });
+          } else {
+            this.kMeans!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
+            this.kMeans!.compute({
+              steps: repulsion.steps,
+              reinitialize: repulsion.resetCentroids,
+              iterationCount: this.totalIterations,
+            });
+          }
         }
         fa2Program.activate();
       }
