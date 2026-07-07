@@ -1,23 +1,7 @@
-import { getRegionsCount } from "../../utils/quadtree";
-import { getNextPowerOfTwo, getTextureSize } from "../../utils/webgl";
-import { BitonicSortGPU } from "../bitonicSortGPU";
-import { WebCLProgram } from "../webCLProgram";
-import { getVertexShader } from "../webCLProgram/vertex";
-import { getQuadTreeAggregateFragmentShader } from "./fragment-aggregate";
-import { getQuadTreeBoundariesFragmentShader } from "./fragment-boundaries";
-import { getQuadTreeIndexFragmentShader } from "./fragment-index";
-import { getQuadTreeOffsetFragmentShader } from "./fragment-offset";
-import { getQuadTreeSetupSortFragmentShader } from "./fragment-setup-sort";
-
-const ATTRIBUTES_PER_ITEM = {
-  boundaries: 4,
-  nodesPosition: 4,
-  nodesRegionsIDs: 4,
-  regionsBarycenters: 4,
-  regionsOffsets: 2,
-  values: 1,
-  sortOn: 1,
-} as const;
+import { createFloatTexture, createFramebuffer, createProgram } from "../../utils/webgl";
+import { BoundariesGPU } from "../boundariesGPU";
+import { getQuadTreeSplatFragmentShader } from "./fragment-splat";
+import { getQuadTreeSplatVertexShader } from "./vertex-splat";
 
 export type QuadTreeGPUSettings = {
   depth: number;
@@ -25,118 +9,99 @@ export type QuadTreeGPUSettings = {
 
 export type QuadTreeNode = { x: number; y: number; mass?: number };
 
-export const DEFAULT_QUAD_TREE_GPU_SETTINGS: QuadTreeGPUSettings = {
-  depth: 4,
-};
+/**
+ * Returns a depth so that the finest grid has roughly one cell per node
+ * (finest grid size is 2^depth, so 4^depth cells).
+ */
+export function getDefaultQuadTreeDepth(nodesCount: number): number {
+  return Math.max(3, Math.min(11, Math.ceil(Math.log2(Math.max(nodesCount, 2)) / 2)));
+}
 
+export function getQuadTreeLevelSize(level: number): number {
+  return 2 ** (level + 1);
+}
+
+/**
+ * All levels are stacked vertically in a single atlas texture: level 0 (2x2)
+ * starts at row 0, level 1 (4x4) at row 2, level 2 (8x8) at row 6, etc.
+ */
+export function getQuadTreeLevelRowOffset(level: number): number {
+  return 2 ** (level + 1) - 2;
+}
+
+export function getQuadTreeAtlasWidth(depth: number): number {
+  return 2 ** depth;
+}
+
+export function getQuadTreeAtlasHeight(depth: number): number {
+  return 2 ** (depth + 1) - 2;
+}
+
+/**
+ * This class computes a complete quadtree over the nodes, stored as a stack
+ * of uniform grids (one per depth):
+ * - Each level is a 2^(level+1) x 2^(level+1) grid, covering the square
+ *   bounding box of the graph
+ * - Each cell accumulates the mass, weighted position sum and count of the
+ *   nodes it contains
+ * - Cells are filled by drawing all nodes as 1px points with additive
+ *   blending (one draw call per level), so there is no sorting and no CPU
+ *   readback involved
+ */
 export class QuadTreeGPU {
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
   private gl: WebGL2RenderingContext;
   private nodesCount: number;
   private params: QuadTreeGPUSettings;
 
   // Programs:
-  private boundariesProgram: WebCLProgram<"nodesPosition", "boundaries">;
-  private indexProgram: WebCLProgram<"nodesPosition" | "boundaries", "nodesRegionsIDs">;
-  private aggregateProgram: WebCLProgram<"nodesPosition" | "nodesRegionsIDs", "regionsBarycenters">;
-  private offsetProgram: WebCLProgram<"regionsBarycenters", "regionsOffsets">;
-  private setupSortProgram: WebCLProgram<"nodesRegionsIDs", "values" | "sortOn">;
-  private bitonicSort: BitonicSortGPU;
+  private boundaries: BoundariesGPU;
+  private splatProgram: WebGLProgram;
+  private splatVAO: WebGLVertexArrayObject;
+  private splatUniformLocations: {
+    nodesPositionTexture: WebGLUniformLocation | null;
+    boundariesTexture: WebGLUniformLocation | null;
+    gridSize: WebGLUniformLocation | null;
+  };
+
+  // Output:
+  private atlasTexture: WebGLTexture;
+  private atlasFramebuffer: WebGLFramebuffer;
 
   constructor(
     gl: WebGL2RenderingContext,
     { nodesTexture, nodesCount }: { nodesCount: number; nodesTexture?: WebGLTexture },
-    params: Partial<QuadTreeGPUSettings> = {},
+    params: QuadTreeGPUSettings,
   ) {
     this.gl = gl;
     this.nodesCount = nodesCount;
-    this.params = { ...DEFAULT_QUAD_TREE_GPU_SETTINGS, ...params };
-    const regionsCount = getRegionsCount(this.params.depth);
+    this.params = params;
 
-    // BitonicSort requires power-of-2 sized arrays, so we need to extend our node count
-    const sortedArraySize = getNextPowerOfTwo(nodesCount);
+    // Additive blending on 32-bits float textures requires this extension:
+    const ext = gl.getExtension("EXT_float_blend");
+    if (!ext) {
+      throw new Error("QuadTreeGPU: EXT_float_blend extension not supported");
+    }
 
-    // Initialize programs:
-    this.boundariesProgram = new WebCLProgram({
-      gl,
-      name: "QuadTree - Boundaries",
-      fragments: 1,
-      fragmentShaderSource: getQuadTreeBoundariesFragmentShader({
-        nodesCount,
-      }),
-      vertexShaderSource: getVertexShader(),
-      dataTextures: [
-        { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition, items: nodesCount },
-      ],
-      outputTextures: [{ name: "boundaries", attributesPerItem: ATTRIBUTES_PER_ITEM.boundaries }],
-    });
+    // Boundaries program (parallel min/max reduction):
+    this.boundaries = new BoundariesGPU(gl, { nodesCount });
 
-    this.indexProgram = new WebCLProgram({
-      gl,
-      name: "QuadTree - Indexation",
-      fragments: nodesCount,
-      fragmentShaderSource: getQuadTreeIndexFragmentShader({
-        nodesCount,
-        depth: this.params.depth,
-      }),
-      vertexShaderSource: getVertexShader(),
-      dataTextures: [
-        { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition, items: nodesCount },
-        { name: "boundaries", attributesPerItem: ATTRIBUTES_PER_ITEM.boundaries, items: 1 },
-      ],
-      outputTextures: [{ name: "nodesRegionsIDs", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesRegionsIDs }],
-    });
+    // Splat program (points drawing, cannot use WebCLProgram):
+    this.splatProgram = createProgram(gl, getQuadTreeSplatVertexShader({ nodesCount }), getQuadTreeSplatFragmentShader(), "splat program");
+    this.splatUniformLocations = {
+      nodesPositionTexture: gl.getUniformLocation(this.splatProgram, "u_nodesPositionTexture"),
+      boundariesTexture: gl.getUniformLocation(this.splatProgram, "u_boundariesTexture"),
+      gridSize: gl.getUniformLocation(this.splatProgram, "u_gridSize"),
+    };
 
-    this.aggregateProgram = new WebCLProgram({
-      gl,
-      name: "QuadTree - Aggregate",
-      fragments: regionsCount,
-      fragmentShaderSource: getQuadTreeAggregateFragmentShader({
-        nodesCount,
-        depth: this.params.depth,
-      }),
-      vertexShaderSource: getVertexShader(),
-      dataTextures: [
-        { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition, items: nodesCount },
-        { name: "nodesRegionsIDs", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesRegionsIDs, items: nodesCount },
-      ],
-      outputTextures: [{ name: "regionsBarycenters", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsBarycenters }],
-    });
+    // The splat program draws points without any attribute (it only uses
+    // gl_VertexID). It gets its own empty VAO, so that the attribute 0 state
+    // shared by all WebCLPrograms (on the default VAO) is left untouched:
+    this.splatVAO = gl.createVertexArray() as WebGLVertexArrayObject;
 
-    this.offsetProgram = new WebCLProgram({
-      gl,
-      name: "QuadTree - Offsets",
-      fragments: regionsCount,
-      fragmentShaderSource: getQuadTreeOffsetFragmentShader({
-        depth: this.params.depth,
-      }),
-      vertexShaderSource: getVertexShader(),
-      dataTextures: [
-        { name: "regionsBarycenters", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsBarycenters, items: regionsCount },
-      ],
-      outputTextures: [{ name: "regionsOffsets", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsOffsets }],
-    });
-
-    this.setupSortProgram = new WebCLProgram({
-      gl,
-      name: "QuadTree - Prepare Bitonic sort",
-      fragments: sortedArraySize,
-      fragmentShaderSource: getQuadTreeSetupSortFragmentShader({
-        nodesCount,
-        depth: this.params.depth,
-      }),
-      vertexShaderSource: getVertexShader(),
-      dataTextures: [
-        { name: "nodesRegionsIDs", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesRegionsIDs, items: nodesCount },
-      ],
-      outputTextures: [
-        { name: "values", attributesPerItem: ATTRIBUTES_PER_ITEM.values },
-        { name: "sortOn", attributesPerItem: ATTRIBUTES_PER_ITEM.sortOn },
-      ],
-    });
-
-    this.bitonicSort = new BitonicSortGPU(gl, { valuesCount: nodesCount, attributesPerItem: 1 });
+    // Atlas texture and framebuffer:
+    const { depth } = this.params;
+    this.atlasTexture = createFloatTexture(gl, getQuadTreeAtlasWidth(depth), getQuadTreeAtlasHeight(depth));
+    this.atlasFramebuffer = createFramebuffer(gl, this.atlasTexture, "QuadTreeGPU atlas framebuffer");
 
     // Initial data textures rebind:
     this.wireTextures(nodesTexture);
@@ -147,108 +112,76 @@ export class QuadTreeGPU {
    * ***********
    */
   public wireTextures(nodesTexture?: WebGLTexture) {
-    const { boundariesProgram, indexProgram, aggregateProgram, offsetProgram, setupSortProgram } = this;
-
-    if (nodesTexture) boundariesProgram.dataTexturesIndex.nodesPosition.texture = nodesTexture;
-    WebCLProgram.wirePrograms({ boundariesProgram, indexProgram, aggregateProgram, offsetProgram, setupSortProgram });
+    this.boundaries.wireTextures(nodesTexture);
   }
 
   public compute() {
-    const { boundariesProgram, indexProgram, aggregateProgram, offsetProgram, setupSortProgram, bitonicSort } = this;
+    const { gl, boundaries, splatProgram, splatVAO, atlasFramebuffer } = this;
+    const { depth } = this.params;
 
-    // Search boundaries
-    boundariesProgram.activate();
-    boundariesProgram.prepare();
-    boundariesProgram.compute();
+    // 1. Compute boundaries:
+    boundaries.compute();
 
-    // Index nodes
-    indexProgram.activate();
-    indexProgram.prepare();
-    indexProgram.compute();
+    // 2. Splat all nodes into each level of the quadtree:
+    gl.useProgram(splatProgram);
+    gl.bindVertexArray(splatVAO);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, atlasFramebuffer);
 
-    // Index each level mass and center
-    aggregateProgram.activate();
-    aggregateProgram.prepare();
-    aggregateProgram.compute();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, boundaries.getNodesTexture());
+    gl.uniform1i(this.splatUniformLocations.nodesPositionTexture, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, boundaries.getBoundariesTexture());
+    gl.uniform1i(this.splatUniformLocations.boundariesTexture, 1);
 
-    // Count each region offset
-    offsetProgram.activate();
-    offsetProgram.prepare();
-    offsetProgram.compute();
+    gl.viewport(0, 0, getQuadTreeAtlasWidth(depth), getQuadTreeAtlasHeight(depth));
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
 
-    // Prepare bitonic sort
-    setupSortProgram.activate();
-    setupSortProgram.prepare();
-    setupSortProgram.compute();
+    gl.enable(gl.BLEND);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.blendFunc(gl.ONE, gl.ONE);
 
-    // Sort nodes
-    bitonicSort.setTextures({
-      valuesTexture: setupSortProgram.outputTexturesIndex.values.texture,
-      sortOnTexture: setupSortProgram.outputTexturesIndex.sortOn.texture,
-    });
-    bitonicSort.sort();
+    for (let level = 0; level < depth; level++) {
+      const size = getQuadTreeLevelSize(level);
+      gl.viewport(0, getQuadTreeLevelRowOffset(level), size, size);
+      gl.uniform1f(this.splatUniformLocations.gridSize, size);
+      gl.drawArrays(gl.POINTS, 0, this.nodesCount);
+    }
+
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
   // These methods are for the WebGL pipelines:
-  public getNodesRegionsTexture(): WebGLTexture {
-    return this.indexProgram.outputTexturesIndex.nodesRegionsIDs.texture;
-  }
-  public getRegionsBarycentersTexture(): WebGLTexture {
-    return this.aggregateProgram.outputTexturesIndex.regionsBarycenters.texture;
-  }
-  public getRegionsOffsetsTexture(): WebGLTexture {
-    return this.offsetProgram.outputTexturesIndex.regionsOffsets.texture;
-  }
-  public getNodesInRegionsTexture(): WebGLTexture {
-    return this.bitonicSort.getSortedTexture();
+  public getAtlasTexture(): WebGLTexture {
+    return this.atlasTexture;
   }
   public getBoundariesTexture(): WebGLTexture {
-    return this.boundariesProgram.outputTexturesIndex.boundaries.texture;
+    return this.boundaries.getBoundariesTexture();
   }
-  public getPrograms() {
-    const { boundariesProgram, indexProgram, aggregateProgram, offsetProgram, setupSortProgram, bitonicSort } = this;
-
-    return {
-      boundariesProgram,
-      indexProgram,
-      aggregateProgram,
-      offsetProgram,
-      setupSortProgram,
-      ...bitonicSort.getPrograms(),
-    };
+  public getDepth(): number {
+    return this.params.depth;
   }
 
-  // These methods are for using the quad-tree directly (and for testing):
+  // These methods are for using the quadtree directly (and for testing):
   public setNodesData(nodes: QuadTreeNode[]) {
-    const { nodesCount, boundariesProgram } = this;
-    const textureSize = getTextureSize(nodesCount);
-    const nodesByteArray = new Float32Array(ATTRIBUTES_PER_ITEM.nodesPosition * textureSize ** 2);
-
-    nodes.forEach(({ x, y, mass }, i) => {
-      mass = mass || 1;
-
-      nodesByteArray[i * 4] = x;
-      nodesByteArray[i * 4 + 1] = y;
-      nodesByteArray[i * 4 + 2] = mass;
-    });
-
-    boundariesProgram.activate();
-    boundariesProgram.prepare();
-    boundariesProgram.setTextureData("nodesPosition", nodesByteArray, nodesCount);
+    this.boundaries.setNodesData(nodes);
   }
   public getBoundaries() {
-    return Array.from(this.boundariesProgram.getOutput("boundaries"));
+    return this.boundaries.getBoundaries();
   }
-  public getNodesRegions() {
-    return Array.from(this.indexProgram.getOutput("nodesRegionsIDs"));
-  }
-  public getRegionsBarycenters() {
-    return Array.from(this.aggregateProgram.getOutput("regionsBarycenters"));
-  }
-  public getRegionsOffsets() {
-    return Array.from(this.offsetProgram.getOutput("regionsOffsets"));
-  }
-  public getNodesInRegions() {
-    return this.bitonicSort.getSortedValues();
+  public getLevelData(level: number): Float32Array {
+    const { gl, atlasFramebuffer } = this;
+    const size = getQuadTreeLevelSize(level);
+    const outputArr = new Float32Array(size * size * 4);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, atlasFramebuffer);
+    gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
+    gl.readPixels(0, getQuadTreeLevelRowOffset(level), size, size, gl.RGBA, gl.FLOAT, outputArr);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    return outputArr;
   }
 }

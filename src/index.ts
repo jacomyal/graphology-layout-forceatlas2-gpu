@@ -1,3 +1,4 @@
+export * from "./programs/boundariesGPU";
 export * from "./programs/forceAtlas2GPU";
 export * from "./programs/quadTreeGPU";
 export * from "./programs/kMeansGPU";

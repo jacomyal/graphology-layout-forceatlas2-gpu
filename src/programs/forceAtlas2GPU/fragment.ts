@@ -1,11 +1,6 @@
 import Graph from "graphology";
 
-import {
-  GLSL_getMortonIdDepth,
-  GLSL_getParentMortonId,
-  GLSL_getRegionsCount,
-  getRegionsCount,
-} from "../../utils/quadtree";
+import { getDefaultQuadTreeDepth } from "../quadTreeGPU";
 import {
   GLSL_getIndex,
   GLSL_getValueInTexture,
@@ -25,9 +20,13 @@ export function getForceAtlas2FragmentShader({
 }: {
   graph: Graph;
 } & ForceAtlas2Settings) {
-  const quadTreeDepth = repulsion.type === "quad-tree" ? repulsion.depth : 1;
-  const quadTreeTheta = repulsion.type === "quad-tree" ? repulsion.theta : 0;
   const kMeansCentroids = repulsion.type === "k-means" ? repulsion.centroids : 1;
+  const quadTreeDepth = repulsion.type === "quad-tree" ? (repulsion.depth ?? getDefaultQuadTreeDepth(graph.order)) : 1;
+  // Cells more than quadTreeRing cells away (Chebyshev distance) are
+  // considered "well separated", like Barnes-Hut cells passing the
+  // size/distance < theta test (on a uniform grid, this is a distance in
+  // cells: ceil(1/theta)):
+  const quadTreeRing = repulsion.type === "quad-tree" ? Math.max(1, Math.ceil(1 / (repulsion.theta ?? 1))) : 1;
 
   // language=GLSL
   const SHADER = /*glsl*/ `#version 300 es
@@ -37,12 +36,10 @@ precision highp float;
 #define NODES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.order))}
 #define SORTED_TEXTURE_SIZE ${numberToGLSLFloat(getSortedTextureSize(graph.order))}
 #define EDGES_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(graph.size * 2))}
-#define QUAD_TREE_DEPTH ${Math.floor(quadTreeDepth)}
-#define QUAD_TREE_REGIONS_COUNT ${Math.floor(getRegionsCount(quadTreeDepth))}
-#define QUAD_TREE_REGIONS_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(getRegionsCount(quadTreeDepth)))}
-#define QUAD_TREE_THETA_SQUARED ${numberToGLSLFloat(quadTreeTheta * quadTreeTheta)}
 #define K_MEANS_CENTROIDS_COUNT ${numberToGLSLFloat(kMeansCentroids)}
 #define K_MEANS_CENTROIDS_TEXTURE_SIZE ${numberToGLSLFloat(getTextureSize(kMeansCentroids))}
+#define QUAD_TREE_DEPTH ${Math.floor(quadTreeDepth)}
+#define QUAD_TREE_RING ${Math.floor(quadTreeRing)}
 ${linLogMode ? "#define LINLOG_MODE" : ""}
 ${adjustSizes ? "#define ADJUST_SIZES" : ""}
 ${strongGravityMode ? "#define STRONG_GRAVITY_MODE" : ""}
@@ -58,11 +55,8 @@ uniform sampler2D u_nodesMetadataTexture;
 uniform sampler2D u_edgesTexture;
 
 // Quad-tree
-uniform sampler2D u_nodesRegionsTexture;
-uniform sampler2D u_regionsBarycentersTexture;
-uniform sampler2D u_regionsOffsetsTexture;
-uniform sampler2D u_nodesInRegionsTexture;
 uniform sampler2D u_boundariesTexture;
+uniform sampler2D u_quadTreeTexture;
 
 // K-means
 uniform sampler2D u_centroidsPositionTexture;
@@ -93,25 +87,6 @@ layout(location = 1) out vec4 movementOutput;
 ${GLSL_getValueInTexture}
 ${GLSL_getIndex}
 
-${GLSL_getRegionsCount}
-${GLSL_getMortonIdDepth}
-${GLSL_getParentMortonId}
-
-// To set a region as used:
-int usedRegions[${Math.floor(getRegionsCount(quadTreeDepth) / 32) || 1}]; // 9 * 32 = 288 bits, which covers 264 regions.
-void setRegionUsed(int regionId) {
-  int index = regionId / 32; // Find the relevant int in the array.
-  int bit = regionId % 32;   // Find the bit within that int.
-  usedRegions[index] |= (1 << bit);
-}
-
-// To check if a region is used:
-bool isRegionUsed(int regionId) {
-  int index = regionId / 32;
-  int bit = regionId % 32;
-  return (usedRegions[index] & (1 << bit)) != 0;
-}
-
 void main() {
   float nodeIndex = getIndex(v_textureCoord, NODES_TEXTURE_SIZE);
   if (nodeIndex >= NODES_COUNT) return;
@@ -136,87 +111,7 @@ void main() {
   // REPULSION:
   float repulsionCoefficient = u_scalingRatio;
 
-  #if defined(QUAD_TREE_ENABLED)
-    vec4 nodeRegions = getValueInTexture(u_nodesRegionsTexture, nodeIndex, NODES_TEXTURE_SIZE);
-
-    vec4 boundaries = getValueInTexture(u_boundariesTexture, 0.0, 1.0);
-    float xMin = boundaries[0];
-    float xMax = boundaries[1];
-    float yMin = boundaries[2];
-    float yMax = boundaries[3];
-    float rootSizeSquare = max(xMax - xMin, yMax - yMin);
-
-    // Region-to-node repulsion (using quad tree):
-    for (int regionId = 0; regionId < QUAD_TREE_REGIONS_COUNT; regionId++) {
-      int depth = getMortonIdDepth(regionId);
-      int parentId = getParentMortonId(regionId);
-      
-      // Skip current node's regions:
-      if (nodeRegions[depth - 1] == float(regionId)) {
-        continue;
-      } 
-    
-      // Skip regions whose parents have been used for repulsion:
-      if (depth > 1 && isRegionUsed(parentId)) {
-        setRegionUsed(regionId);
-        continue;
-      }
-    
-      vec4 regionBarycenter = getValueInTexture(u_regionsBarycentersTexture, float(regionId), QUAD_TREE_REGIONS_TEXTURE_SIZE);
-      vec2 regionCoordinates = regionBarycenter.xy;
-      float regionMass = regionBarycenter.z;
-    
-      vec2 diff = nodePosition.xy - regionCoordinates;
-      float dSquare = dot(diff, diff);
-      float regionSizeSquare = rootSizeSquare / pow(2.0, float(depth));
-    
-      // Barnes-Hut Theta test:
-      if (4.0 * regionSizeSquare / dSquare < QUAD_TREE_THETA_SQUARED) {
-        // If it's "far enough", we consider the region as a single body
-        setRegionUsed(regionId);
-        float factor = repulsionCoefficient * nodeMass * regionMass / dSquare;
-        dx += diff.x * factor;
-        dy += diff.y * factor;
-      } else {
-        // Else, if we are at the deepest level, we apply repulsion from each of its nodes
-        vec2 regionOffset = getValueInTexture(u_regionsOffsetsTexture, float(regionId), QUAD_TREE_REGIONS_TEXTURE_SIZE).xy;
-        float startIndex = regionOffset.y;
-        float endIndex = startIndex + regionOffset.x;
-
-        for (float j = startIndex; j < endIndex; j++) {
-          float otherNodeIndex = getValueInTexture(u_nodesInRegionsTexture, j, SORTED_TEXTURE_SIZE).x;
-          vec4 otherNodePosition = getValueInTexture(u_nodesPositionTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
-          vec4 otherNodeMetadata = getValueInTexture(u_nodesMetadataTexture, otherNodeIndex, NODES_TEXTURE_SIZE);
-          float otherNodeMass = otherNodePosition.z;
-          float otherNodeSize = otherNodeMetadata.r;
-
-          vec2 diff = nodePosition.xy - otherNodePosition.xy;
-          float factor = 0.0;
-
-          #if defined(ADJUST_SIZES)
-            // Anticollision Linear Repulsion
-            float d = sqrt(dot(diff, diff)) - nodeSize - otherNodeSize;
-            if (d > 0.0) {
-              factor = repulsionCoefficient * nodeMass * otherNodeMass / (d * d);
-            } else if (d < 0.0) {
-              factor = 100.0 * repulsionCoefficient * nodeMass * otherNodeMass;
-            }
-
-          #else
-            // Linear Repulsion
-            float dSquare = dot(diff, diff);
-            if (dSquare > 0.0) {
-              factor = repulsionCoefficient * nodeMass * otherNodeMass / dSquare;
-            }
-          #endif
-
-          dx += diff.x * factor;
-          dy += diff.y * factor;
-        }
-      }
-    }
-
-  #elif defined(K_MEANS_ENABLED)
+  #if defined(K_MEANS_ENABLED)
     // Node-to-centroid repulsion (k-means):
     for (float j = 0.0; j < K_MEANS_CENTROIDS_COUNT; j++) {
       vec4 centroidData = getValueInTexture(u_centroidsPositionTexture, j, K_MEANS_CENTROIDS_TEXTURE_SIZE);
@@ -297,6 +192,67 @@ void main() {
 
       dx += diff.x * factor;
       dy += diff.y * factor;
+    }
+
+  #elif defined(QUAD_TREE_ENABLED)
+    // Quadtree repulsion:
+    // The quadtree is complete, so each level is a 2^(level+1) x 2^(level+1)
+    // grid of cells, whose centers of mass are read from the atlas texture.
+    // For a given node, at each level, the cells "well separated" from the
+    // node (more than QUAD_TREE_RING cells away, i.e. passing the
+    // size/distance < theta test) but not already handled at a coarser
+    // level (inside its parent's neighborhood, refined) are used as single
+    // bodies. At the finest level, the remaining neighborhood is used as
+    // well, with the node's own contribution removed from its own cell.
+    // Square bounding box (must match the splat vertex shader):
+    vec4 boundaries = getValueInTexture(u_boundariesTexture, 0.0, 1.0);
+    vec2 bbCenter = vec2((boundaries.x + boundaries.y) / 2.0, (boundaries.z + boundaries.w) / 2.0);
+    float bbSide = max(max(boundaries.y - boundaries.x, boundaries.w - boundaries.z), 1e-6);
+    vec2 relativePosition = clamp((nodePosition.xy - bbCenter) / bbSide + 0.5, 0.0, 0.999999);
+
+    for (int level = 0; level < QUAD_TREE_DEPTH; level++) {
+      int gridSize = 1 << (level + 1);
+      int rowOffset = gridSize - 2;
+      ivec2 cell = ivec2(floor(relativePosition * float(gridSize)));
+      ivec2 blockMin = (cell / 2 - QUAD_TREE_RING) * 2;
+      bool isFinestLevel = level == QUAD_TREE_DEPTH - 1;
+
+      // The block of cells covering the node's parent cell's neighborhood at
+      // the previous level:
+      for (int i = 0; i < 4 * QUAD_TREE_RING + 2; i++) {
+        for (int j = 0; j < 4 * QUAD_TREE_RING + 2; j++) {
+          ivec2 otherCell = blockMin + ivec2(i, j);
+          if (otherCell.x < 0 || otherCell.y < 0 || otherCell.x >= gridSize || otherCell.y >= gridSize) continue;
+
+          bool isNeighborCell = abs(otherCell.x - cell.x) <= QUAD_TREE_RING && abs(otherCell.y - cell.y) <= QUAD_TREE_RING;
+          if (isNeighborCell && !isFinestLevel) continue;
+
+          vec4 cellData = texelFetch(u_quadTreeTexture, ivec2(otherCell.x, rowOffset + otherCell.y), 0);
+          vec2 cellMassSum = cellData.rg;
+          float cellMass = cellData.b;
+
+          // Remove the node's own contribution from its own cell:
+          if (isFinestLevel && all(equal(otherCell, cell))) {
+            cellMassSum -= nodePosition.xy * nodeMass;
+            cellMass -= nodeMass;
+          }
+          if (cellMass <= 0.0) continue;
+
+          vec2 diff = nodePosition.xy - cellMassSum / cellMass;
+          float dSquare = dot(diff, diff);
+          if (dSquare <= 0.0) {
+            // Coincident positions: use a deterministic tiny offset to break the tie
+            float angle = nodeIndex * 2.399963229728653;
+            diff = vec2(cos(angle), sin(angle)) * bbSide / float(gridSize) * 0.01;
+            dSquare = dot(diff, diff);
+          }
+
+          // Linear Repulsion
+          float factor = repulsionCoefficient * nodeMass * cellMass / dSquare;
+          dx += diff.x * factor;
+          dy += diff.y * factor;
+        }
+      }
     }
 
   #else

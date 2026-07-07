@@ -1,11 +1,10 @@
 import Graph from "graphology";
 import { EdgeDisplayData, NodeDisplayData } from "sigma/types";
 
-import { getRegionsCount } from "../../utils/quadtree";
 import { getTextureSize } from "../../utils/webgl";
 import { KMeansGPU } from "../kMeansGPU";
 import { KMeansGroupedGPU } from "../kMeansGroupedGPU";
-import { QuadTreeGPU } from "../quadTreeGPU";
+import { QuadTreeGPU, getDefaultQuadTreeDepth } from "../quadTreeGPU";
 import { WebCLProgram } from "../webCLProgram";
 import { getVertexShader } from "../webCLProgram/vertex";
 import { DEFAULT_FORCE_ATLAS_2_SETTINGS, ForceAtlas2Settings } from "./consts";
@@ -16,15 +15,12 @@ const ATTRIBUTES_PER_ITEM = {
   nodesMovement: 4,
   nodesMetadata: 4,
   edges: 2,
-  nodesRegions: 4,
-  regionsBarycenters: 4,
-  regionsOffsets: 2,
-  nodesInRegions: 1,
   boundaries: 4,
   centroidsPosition: 4,
   centroidsOffsets: 2,
   nodesInCentroids: 1,
   closestCentroid: 1,
+  quadTree: 4,
 } as const;
 
 export type ForceAtlas2Graph = Graph<NodeDisplayData, EdgeDisplayData & { weight?: number }>;
@@ -63,15 +59,12 @@ export class ForceAtlas2GPU {
     | "nodesMovement"
     | "nodesMetadata"
     | "edges"
-    | "nodesRegions"
-    | "regionsBarycenters"
-    | "regionsOffsets"
-    | "nodesInRegions"
     | "boundaries"
     | "centroidsPosition"
     | "centroidsOffsets"
     | "nodesInCentroids"
-    | "closestCentroid",
+    | "closestCentroid"
+    | "quadTree",
     "nodesPosition" | "nodesMovement"
   >;
   private quadTree?: QuadTreeGPU;
@@ -87,12 +80,21 @@ export class ForceAtlas2GPU {
     };
     this.nodeDataCache = {};
 
-    const { repulsion } = this.params;
-    if (repulsion.type === "quad-tree") {
-      if (repulsion.depth < 1 || repulsion.depth > 4) throw new Error("Quad-tree depth must be 1, 2, 3 or 4");
-    } else if (repulsion.type === "k-means") {
+    let { repulsion } = this.params;
+    if (repulsion.type === "k-means") {
       if (repulsion.centroids < 1) throw new Error("K-means must have at least 1 centroid");
       if (repulsion.steps < 1) throw new Error("K-means must have at least 1 step");
+    } else if (repulsion.type === "quad-tree") {
+      // Resolve the depth once, so that the shader and the quadtree always
+      // agree:
+      const depth = repulsion.depth ?? getDefaultQuadTreeDepth(graph.order);
+      if (depth < 1 || depth > 12) throw new Error("Quadtree depth must be between 1 and 12");
+      // Lower thetas mean wider per-level neighborhoods, whose cost grows as
+      // 1/theta^2 (theta=1 reads 27 cells per level, theta=0.25 reads 243):
+      const theta = repulsion.theta ?? 1;
+      if (theta < 0.25 || theta > 1) throw new Error("Quadtree theta must be between 0.25 and 1");
+      repulsion = { ...repulsion, depth, theta };
+      this.params = { ...this.params, repulsion };
     }
 
     this.readGraph();
@@ -112,8 +114,6 @@ export class ForceAtlas2GPU {
     }
 
     // Initialize programs:
-    const quadTreeDepth = repulsion.type === "quad-tree" ? repulsion.depth : 1;
-    const quadTreeRegionsCount = repulsion.type === "quad-tree" ? getRegionsCount(repulsion.depth) : 1;
     const kMeansCentroidsCount = repulsion.type === "k-means" ? repulsion.centroids : 1;
     this.fa2Program = new WebCLProgram({
       gl,
@@ -130,14 +130,6 @@ export class ForceAtlas2GPU {
         { name: "nodesMetadata", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesMetadata, items: graph.order },
         { name: "edges", attributesPerItem: ATTRIBUTES_PER_ITEM.edges, items: graph.size },
         // Quad-tree:
-        { name: "nodesRegions", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesRegions, items: graph.order },
-        {
-          name: "regionsBarycenters",
-          attributesPerItem: ATTRIBUTES_PER_ITEM.regionsBarycenters,
-          items: quadTreeRegionsCount,
-        },
-        { name: "regionsOffsets", attributesPerItem: ATTRIBUTES_PER_ITEM.regionsOffsets, items: quadTreeRegionsCount },
-        { name: "nodesInRegions", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesInRegions, items: graph.order },
         { name: "boundaries", attributesPerItem: ATTRIBUTES_PER_ITEM.boundaries, items: 1 },
         // K-means:
         {
@@ -153,6 +145,8 @@ export class ForceAtlas2GPU {
         },
         { name: "nodesInCentroids", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesInCentroids, items: graph.order },
         { name: "closestCentroid", attributesPerItem: ATTRIBUTES_PER_ITEM.closestCentroid, items: graph.order },
+        // Quad-tree (the texture is a non-square atlas, wired directly):
+        { name: "quadTree", attributesPerItem: ATTRIBUTES_PER_ITEM.quadTree, items: 1 },
       ],
       outputTextures: [
         { name: "nodesPosition", attributesPerItem: ATTRIBUTES_PER_ITEM.nodesPosition },
@@ -162,11 +156,8 @@ export class ForceAtlas2GPU {
 
     // Initialize only the repulsion method that's needed:
     if (repulsion.type === "quad-tree") {
-      this.quadTree = new QuadTreeGPU(this.gl, { nodesCount: graph.order }, { depth: quadTreeDepth });
-      this.fa2Program.dataTexturesIndex.nodesRegions.texture = this.quadTree.getNodesRegionsTexture();
-      this.fa2Program.dataTexturesIndex.regionsBarycenters.texture = this.quadTree.getRegionsBarycentersTexture();
-      this.fa2Program.dataTexturesIndex.regionsOffsets.texture = this.quadTree.getRegionsOffsetsTexture();
-      this.fa2Program.dataTexturesIndex.nodesInRegions.texture = this.quadTree.getNodesInRegionsTexture();
+      this.quadTree = new QuadTreeGPU(this.gl, { nodesCount: graph.order }, { depth: repulsion.depth as number });
+      this.fa2Program.dataTexturesIndex.quadTree.texture = this.quadTree.getAtlasTexture();
       this.fa2Program.dataTexturesIndex.boundaries.texture = this.quadTree.getBoundariesTexture();
     } else if (repulsion.type === "k-means") {
       if (repulsion.nodeToNodeRepulsion) {

@@ -110,6 +110,56 @@ export function compileShader(gl: WebGL2RenderingContext, type: number, source: 
   return shader;
 }
 
+/**
+ * Compiles and links a program. "a_position" (when the vertex shader has it)
+ * is pinned on attribute location 0, so that programs can share VAOs.
+ */
+export function createProgram(
+  gl: WebGL2RenderingContext,
+  vertexShaderSource: string,
+  fragmentShaderSource: string,
+  name = "program",
+): WebGLProgram {
+  const program = gl.createProgram() as WebGLProgram;
+  gl.attachShader(program, compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource));
+  gl.attachShader(program, compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource));
+  gl.bindAttribLocation(program, 0, "a_position");
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    throw new Error(`Failed to link ${name}: ` + gl.getProgramInfoLog(program));
+  }
+  return program;
+}
+
+/**
+ * Creates an RGBA32F texture with NEAREST filtering and CLAMP_TO_EDGE
+ * wrapping (the settings all data textures use here).
+ */
+export function createFloatTexture(gl: WebGL2RenderingContext, width: number, height = width): WebGLTexture {
+  const texture = gl.createTexture() as WebGLTexture;
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return texture;
+}
+
+/**
+ * Creates a framebuffer with the given texture as its color attachment.
+ */
+export function createFramebuffer(gl: WebGL2RenderingContext, texture: WebGLTexture, name = "framebuffer"): WebGLFramebuffer {
+  const framebuffer = gl.createFramebuffer() as WebGLFramebuffer;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    throw new Error(`${name} is not complete`);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return framebuffer;
+}
+
 export function waitForGPUCompletion(gl: WebGL2RenderingContext): Promise<void> {
   return new Promise((resolve, reject) => {
     const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) as WebGLSync;

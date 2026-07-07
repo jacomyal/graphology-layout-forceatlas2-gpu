@@ -5,7 +5,7 @@ export type ForceAtlas2Settings = {
   outboundAttractionDistribution: boolean;
   repulsion:
     | { type: "all-pairs" }
-    | { type: "quad-tree"; depth: number; theta: number }
+    | { type: "quad-tree"; depth?: number; theta?: number }
     | { type: "k-means"; steps: number; centroids: number; resetCentroids: boolean; nodeToNodeRepulsion: boolean; centroidUpdateInterval: number };
   edgeWeightInfluence: number;
   scalingRatio: number;

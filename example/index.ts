@@ -104,8 +104,8 @@ const DEFAULT_PARAMS: Params = {
   initialPositions: "random",
   debug: false,
   repulsionMode: "quad-tree",
-  quadTreeDepth: 3,
-  quadTreeTheta: 0.5,
+  quadTreeDepth: 0,
+  quadTreeTheta: 1,
   kMeansCentroids: 100,
   kMeansSteps: 1,
   kMeansCentroidUpdateInterval: 1,
@@ -119,7 +119,7 @@ const DEFAULT_PARAMS: Params = {
 
 type FieldDef =
   | { type: "checkbox"; name: keyof Params; label: string; section?: boolean }
-  | { type: "number"; name: keyof Params; label: string; step?: string; min?: string; section?: boolean }
+  | { type: "number"; name: keyof Params; label: string; step?: string; min?: string; max?: string; section?: boolean }
   | {
       type: "select";
       name: "repulsionMode" | "initialPositions" | "dataset";
@@ -183,12 +183,12 @@ const FORM_FIELDS: FieldDef[] = [
     section: true,
     options: [
       { value: "all-pairs", label: "All pairs (exact, slow)" },
-      { value: "quad-tree", label: "Quad-tree (Barnes-Hut)" },
+      { value: "quad-tree", label: "Quad-tree" },
       { value: "k-means", label: "K-means" },
     ],
   },
-  { type: "number", name: "quadTreeDepth", label: "Tree depth", step: "1", min: "1" },
-  { type: "number", name: "quadTreeTheta", label: "Tree theta", step: "0.1", min: "0" },
+  { type: "number", name: "quadTreeDepth", label: "Tree depth (0 = auto)", step: "1", min: "0" },
+  { type: "number", name: "quadTreeTheta", label: "Tree theta", step: "0.05", min: "0.25", max: "1" },
   { type: "number", name: "kMeansCentroids", label: "K-means centroids", step: "1", min: "1" },
   { type: "number", name: "kMeansSteps", label: "K-means steps", step: "1", min: "1" },
   { type: "number", name: "kMeansCentroidUpdateInterval", label: "Centroid update interval", step: "1", min: "1" },
@@ -250,6 +250,7 @@ function buildForm(form: HTMLFormElement, params: Params) {
       input.value = String(params[field.name]);
       if (field.step) input.step = field.step;
       if (field.min) input.min = field.min;
+      if (field.max) input.max = field.max;
       group.append(label, input);
     } else if (field.type === "select") {
       const select = document.createElement("select");
@@ -281,7 +282,7 @@ function buildForm(form: HTMLFormElement, params: Params) {
     const mode = data.get("repulsionMode") as RepulsionMode;
     const needsTree = mode === "quad-tree" && useFA2GPU;
     const needsKMeans = mode === "k-means" && useFA2GPU;
-    const showAdjustSizes = mode !== "k-means";
+    const showAdjustSizes = mode === "all-pairs";
 
     const toggle = (name: string, show: boolean) => {
       form.querySelector(`[data-field="${name}"]`)?.classList.toggle("hidden", !show);
@@ -400,7 +401,11 @@ async function init() {
           centroidUpdateInterval: params.kMeansCentroidUpdateInterval,
         };
       case "quad-tree":
-        return { type: "quad-tree", depth: params.quadTreeDepth, theta: params.quadTreeTheta };
+        return {
+          type: "quad-tree",
+          theta: params.quadTreeTheta,
+          ...(params.quadTreeDepth > 0 ? { depth: params.quadTreeDepth } : {}),
+        };
       default:
         return { type: "all-pairs" };
     }
