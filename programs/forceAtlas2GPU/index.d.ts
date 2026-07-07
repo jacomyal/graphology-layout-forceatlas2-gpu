@@ -1,0 +1,51 @@
+import { default as Graph } from '../../../@types/graphology';
+import { EdgeDisplayData, NodeDisplayData } from 'sigma/types';
+import { KMeansGPU } from '../kMeansGPU';
+import { KMeansGroupedGPU } from '../kMeansGroupedGPU';
+import { QuadTreeGPU } from '../quadTreeGPU';
+import { ForceAtlas2Settings } from './consts';
+
+export type ForceAtlas2Graph = Graph<NodeDisplayData, EdgeDisplayData & {
+    weight?: number;
+}>;
+export declare class ForceAtlas2GPU {
+    private canvas;
+    private gl;
+    private static readonly MAX_PENDING_BATCHES;
+    private remainingIterations;
+    private running;
+    private animationFrameID;
+    private params;
+    private totalIterations;
+    private lastSyncTime;
+    private syncPending;
+    private batchFences;
+    private graph;
+    private maxNeighborsCount;
+    private outboundAttCompensation;
+    private nodeDataCache;
+    private nodesPositionArray;
+    private nodesMovementArray;
+    private nodesMetadataArray;
+    private edgesArray;
+    private fa2Program;
+    private quadTree?;
+    private kMeans?;
+    private kMeansGrouped?;
+    constructor(graph: ForceAtlas2Graph, params?: Partial<ForceAtlas2Settings>);
+    private readGraph;
+    private applyNodesPositions;
+    private swapFA2Textures;
+    private runIteration;
+    private runFrame;
+    private clearBatchFences;
+    private finishRun;
+    start(iterations?: number): void;
+    stop(): void;
+    run(): void;
+    isRunning(): boolean;
+    getTotalIterations(): number;
+    getKMeans(): KMeansGPU;
+    getKMeansGrouped(): KMeansGroupedGPU;
+    getQuadTree(): QuadTreeGPU;
+}
