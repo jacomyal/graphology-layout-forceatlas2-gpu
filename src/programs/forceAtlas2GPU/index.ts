@@ -29,12 +29,20 @@ export class ForceAtlas2GPU {
   private canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext;
 
+  // At most this many issued-but-not-finished batches of iterations. 2 keeps
+  // the GPU busy while a batch runs, without letting the command queue grow
+  // unboundedly (which freezes the whole page when the GPU can't keep up):
+  private static readonly MAX_PENDING_BATCHES = 2;
+
   // Internal state:
-  private remainingSteps = 0;
+  private remainingIterations = -1;
   private running = false;
   private animationFrameID: null | number = null;
   private params: ForceAtlas2Settings;
   private totalIterations = 0;
+  private lastSyncTime = 0;
+  private syncPending = false;
+  private batchFences: WebGLSync[] = [];
 
   // Graph data and various caches:
   private graph: ForceAtlas2Graph;
@@ -254,23 +262,16 @@ export class ForceAtlas2GPU {
     this.outboundAttCompensation /= graph.order;
   }
 
-  private updateGraph() {
-    const { graph } = this;
-
-    this.fa2Program.activate();
-    const nodesPosition = this.fa2Program.getOutput("nodesPosition");
-
-    graph.updateEachNodeAttributes((node, attributes) => {
-      const { index } = this.nodeDataCache[node];
-      const x = nodesPosition[ATTRIBUTES_PER_ITEM.nodesPosition * index];
-      const y = nodesPosition[ATTRIBUTES_PER_ITEM.nodesPosition * index + 1];
-
-      return {
-        ...attributes,
-        x,
-        y,
-      };
-    });
+  private applyNodesPositions(nodesPosition: Float32Array) {
+    this.graph.updateEachNodeAttributes(
+      (node, attributes) => {
+        const { index } = this.nodeDataCache[node];
+        attributes.x = nodesPosition[ATTRIBUTES_PER_ITEM.nodesPosition * index];
+        attributes.y = nodesPosition[ATTRIBUTES_PER_ITEM.nodesPosition * index + 1];
+        return attributes;
+      },
+      { attributes: ["x", "y"] },
+    );
   }
 
   private swapFA2Textures() {
@@ -279,76 +280,147 @@ export class ForceAtlas2GPU {
     fa2Program.swapTextures("nodesMovement", "nodesMovement");
   }
 
-  private step() {
+  private runIteration() {
     const { fa2Program, params } = this;
-    const { iterationsPerStep, repulsion } = params;
+    const { repulsion } = params;
 
-    let remainingIterations = iterationsPerStep;
-
-    while (remainingIterations-- > 0) {
-      if (!this.running) {
-        this.stop();
-        return;
-      }
-
-      // Compute additional repulsion structures if needed:
-      if (repulsion.type === "quad-tree") {
-        this.quadTree!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
-        this.quadTree!.compute();
-        fa2Program.activate();
-      } else if (repulsion.type === "k-means") {
-        // Only recompute centroids based on centroidUpdateInterval
-        if (this.totalIterations % repulsion.centroidUpdateInterval === 0) {
-          if (repulsion.nodeToNodeRepulsion) {
-            this.kMeansGrouped!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
-            this.kMeansGrouped!.compute({
-              steps: repulsion.steps,
-              reinitialize: repulsion.resetCentroids,
-              iterationCount: this.totalIterations,
-            });
-          } else {
-            this.kMeans!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
-            this.kMeans!.compute({
-              steps: repulsion.steps,
-              reinitialize: repulsion.resetCentroids,
-              iterationCount: this.totalIterations,
-            });
-          }
+    // Compute additional repulsion structures if needed:
+    if (repulsion.type === "quad-tree") {
+      this.quadTree!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
+      this.quadTree!.compute();
+      fa2Program.activate();
+    } else if (repulsion.type === "k-means") {
+      // Only recompute centroids based on centroidUpdateInterval
+      if (this.totalIterations % repulsion.centroidUpdateInterval === 0) {
+        if (repulsion.nodeToNodeRepulsion) {
+          this.kMeansGrouped!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
+          this.kMeansGrouped!.compute({
+            steps: repulsion.steps,
+            reinitialize: repulsion.resetCentroids,
+            iterationCount: this.totalIterations,
+          });
+        } else {
+          this.kMeans!.wireTextures(fa2Program.dataTexturesIndex.nodesPosition.texture);
+          this.kMeans!.compute({
+            steps: repulsion.steps,
+            reinitialize: repulsion.resetCentroids,
+            iterationCount: this.totalIterations,
+          });
         }
-        fa2Program.activate();
       }
-
-      fa2Program.setUniforms({
-        edgeWeightInfluence: params.edgeWeightInfluence,
-        scalingRatio: params.scalingRatio,
-        gravity: params.gravity,
-        maxForce: params.maxForce,
-        slowDown: params.slowDown,
-        outboundAttCompensation: this.outboundAttCompensation,
-      });
-      fa2Program.prepare();
-      fa2Program.compute();
-
-      if (remainingIterations > 0) this.swapFA2Textures();
-
-      this.totalIterations++;
+      fa2Program.activate();
     }
 
-    this.updateGraph();
+    fa2Program.setUniforms({
+      edgeWeightInfluence: params.edgeWeightInfluence,
+      scalingRatio: params.scalingRatio,
+      gravity: params.gravity,
+      maxForce: params.maxForce,
+      slowDown: params.slowDown,
+      outboundAttCompensation: this.outboundAttCompensation,
+    });
+    fa2Program.prepare();
+    fa2Program.compute();
     this.swapFA2Textures();
 
-    if (this.remainingSteps--) this.animationFrameID = requestIdleCallback(() => this.step());
+    this.totalIterations++;
+  }
+
+  /**
+   * This method runs once per animation frame, and never blocks:
+   * - It only *issues* the iterations' GPU commands (the CPU does not wait
+   *   for their results)
+   * - Positions are synced back to the graphology instance through an
+   *   asynchronous readback, polled here and started at most once every
+   *   syncInterval milliseconds
+   */
+  private runFrame() {
+    if (!this.running) return;
+
+    const { gl, fa2Program, params } = this;
+    const { iterationsPerFrame, syncInterval } = params;
+
+    // 1. Reap the fences of the batches the GPU has finished:
+    this.batchFences = this.batchFences.filter((fence) => {
+      if (gl.clientWaitSync(fence, 0, 0) === gl.TIMEOUT_EXPIRED) return true;
+      gl.deleteSync(fence);
+      return false;
+    });
+
+    // 2. Issue a new batch of iterations, but only if the GPU keeps up
+    //    (backpressure). When it doesn't, skip this frame: the main thread
+    //    stays free, and the iterations rate settles on what the GPU can
+    //    actually sustain:
+    if (this.batchFences.length < ForceAtlas2GPU.MAX_PENDING_BATCHES) {
+      let count = iterationsPerFrame;
+      if (this.remainingIterations >= 0) count = Math.min(count, this.remainingIterations);
+      for (let i = 0; i < count; i++) this.runIteration();
+      if (this.remainingIterations > 0) this.remainingIterations -= count;
+
+      if (count > 0) {
+        this.batchFences.push(gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) as WebGLSync);
+        gl.flush();
+      }
+    }
+
+    // 3. All requested iterations are issued: finish with one last
+    //    synchronous sync (a single stall, at the very end):
+    if (this.remainingIterations === 0) {
+      this.finishRun();
+      return;
+    }
+
+    // 4. Poll the pending readback, if any:
+    if (this.syncPending) {
+      const nodesPosition = fa2Program.pollAsyncDataRead();
+      if (nodesPosition) {
+        this.applyNodesPositions(nodesPosition);
+        this.syncPending = false;
+        this.lastSyncTime = performance.now();
+      }
+    }
+
+    // 5. Maybe enqueue a fresh readback:
+    if (!this.syncPending && performance.now() - this.lastSyncTime >= syncInterval) {
+      this.syncPending = fa2Program.startAsyncDataRead("nodesPosition");
+    }
+
+    this.animationFrameID = window.requestAnimationFrame(() => this.runFrame());
+  }
+
+  private clearBatchFences() {
+    this.batchFences.forEach((fence) => this.gl.deleteSync(fence));
+    this.batchFences = [];
+  }
+
+  private finishRun() {
+    this.clearBatchFences();
+    this.fa2Program.cancelAsyncRead();
+    this.syncPending = false;
+    this.applyNodesPositions(this.fa2Program.getInput("nodesPosition"));
+    this.running = false;
+    this.animationFrameID = null;
   }
 
   /**
    * Public API:
    * ***********
    */
-  public start(steps = -1) {
+  public start(iterations = -1) {
+    // Cancel any previously scheduled frame, so two loops never run at once:
+    if (this.animationFrameID !== null) {
+      window.cancelAnimationFrame(this.animationFrameID);
+      this.animationFrameID = null;
+    }
+
     this.readGraph();
 
-    this.remainingSteps = steps;
+    this.remainingIterations = iterations;
     this.running = true;
+    this.lastSyncTime = performance.now();
+    this.syncPending = false;
+    this.clearBatchFences();
+    this.fa2Program.cancelAsyncRead();
     this.fa2Program.setTextureData("nodesPosition", this.nodesPositionArray, this.graph.order);
     this.fa2Program.setTextureData("nodesMovement", this.nodesMovementArray, this.graph.order);
     this.fa2Program.setTextureData("nodesMetadata", this.nodesMetadataArray, this.graph.order);
@@ -372,14 +444,15 @@ export class ForceAtlas2GPU {
     }
 
     this.fa2Program.activate();
-    this.step();
+    this.runFrame();
   }
 
   public stop() {
-    if (this.animationFrameID) {
-      window.cancelIdleCallback(this.animationFrameID);
+    if (this.animationFrameID !== null) {
+      window.cancelAnimationFrame(this.animationFrameID);
       this.animationFrameID = null;
     }
+    if (this.running) this.finishRun();
     this.running = false;
   }
 
@@ -390,6 +463,10 @@ export class ForceAtlas2GPU {
 
   public isRunning() {
     return this.running;
+  }
+
+  public getTotalIterations() {
+    return this.totalIterations;
   }
 
   // Debug methods

@@ -1,16 +1,24 @@
 import Graph from "graphology";
 
-export function countStepsPerSecond(graph: Graph, stepsPerSync: number = 1) {
+/**
+ * Counts FA2 iterations per second. When getStepsCount is given (GPU case),
+ * it reads the exact iterations count from it. Else (CPU case), it counts
+ * graph updates, assuming one iteration per update.
+ */
+export function countStepsPerSecond(graph: Graph, getStepsCount?: () => number) {
   let isKilled = false;
   let isPaused = false;
   let t0 = Date.now();
   let totalSteps = 0;
   let totalRunningTime = 0; // in milliseconds
-  let currentSessionSteps = 0;
+  let eventSteps = 0;
+  let sessionStartSteps = getStepsCount ? getStepsCount() : 0;
+
+  const getCurrentSessionSteps = () => (getStepsCount ? getStepsCount() - sessionStartSteps : eventSteps);
 
   const onRender = () => {
-    if (isKilled || isPaused) return;
-    currentSessionSteps++;
+    if (isKilled || isPaused || getStepsCount) return;
+    eventSteps++;
   };
   graph.on("eachNodeAttributesUpdated", onRender);
 
@@ -26,7 +34,7 @@ export function countStepsPerSecond(graph: Graph, stepsPerSync: number = 1) {
     } else {
       // When running, calculate current values
       const elapsed = Date.now() - t0;
-      const currentTotalSteps = totalSteps + currentSessionSteps * stepsPerSync;
+      const currentTotalSteps = totalSteps + getCurrentSessionSteps();
       const currentTotalTime = totalRunningTime + elapsed;
       const avgRate = currentTotalTime > 0 ? (currentTotalSteps / currentTotalTime) * 1000 : 0;
 
@@ -62,7 +70,8 @@ export function countStepsPerSecond(graph: Graph, stepsPerSync: number = 1) {
       t0 = Date.now();
       totalSteps = 0;
       totalRunningTime = 0;
-      currentSessionSteps = 0;
+      eventSteps = 0;
+      sessionStartSteps = getStepsCount ? getStepsCount() : 0;
       isPaused = false;
       refreshDisplay();
     },
@@ -70,9 +79,10 @@ export function countStepsPerSecond(graph: Graph, stepsPerSync: number = 1) {
       if (!isPaused) {
         // Accumulate the current session before pausing
         const elapsed = Date.now() - t0;
-        totalSteps += currentSessionSteps * stepsPerSync;
+        totalSteps += getCurrentSessionSteps();
         totalRunningTime += elapsed;
-        currentSessionSteps = 0;
+        eventSteps = 0;
+        sessionStartSteps = getStepsCount ? getStepsCount() : 0;
         isPaused = true;
         refreshDisplay();
       }

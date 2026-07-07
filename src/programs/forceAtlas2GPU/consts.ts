@@ -12,7 +12,11 @@ export type ForceAtlas2Settings = {
   gravity: number;
   slowDown: number;
   maxForce: number;
-  iterationsPerStep: number;
+  // Iterations issued per animation frame (GPU work only, never blocks):
+  iterationsPerFrame: number;
+  // Minimum delay (in ms) between two syncs of the positions back to the
+  // graphology instance:
+  syncInterval: number;
   debug: boolean;
 };
 
@@ -27,6 +31,7 @@ export const DEFAULT_FORCE_ATLAS_2_SETTINGS: ForceAtlas2Settings = {
   gravity: 1,
   slowDown: 1,
   maxForce: 10,
-  iterationsPerStep: 10,
+  iterationsPerFrame: 10,
+  syncInterval: 200,
   debug: false,
 };

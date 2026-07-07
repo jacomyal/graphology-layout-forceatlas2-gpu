@@ -51,7 +51,8 @@ const DATASETS: Record<string, DatasetConfig> = {
 };
 
 const NUMBER_KEYS = [
-  "iterationsPerStep",
+  "iterationsPerFrame",
+  "syncInterval",
   "gravity",
   "scalingRatio",
   "quadTreeDepth",
@@ -92,7 +93,8 @@ type Params = Record<NumberKey, number> &
 
 const DEFAULT_PARAMS: Params = {
   // FA2 params:
-  iterationsPerStep: 100,
+  iterationsPerFrame: 10,
+  syncInterval: 200,
   gravity: 0.02,
   scalingRatio: 10,
   strongGravityMode: true,
@@ -169,7 +171,8 @@ const FORM_FIELDS: FieldDef[] = [
     ],
   },
   { type: "checkbox", name: "debug", label: "Enable debug mode (check console)" },
-  { type: "number", name: "iterationsPerStep", label: "Iterations per step", step: "1", min: "1" },
+  { type: "number", name: "iterationsPerFrame", label: "Iterations per frame", step: "1", min: "1" },
+  { type: "number", name: "syncInterval", label: "Graph sync interval (ms)", step: "10", min: "0" },
   { type: "number", name: "gravity", label: "Gravity", step: "0.001", min: "0" },
   { type: "number", name: "scalingRatio", label: "Scaling ratio", step: "0.1", min: "0" },
   { type: "checkbox", name: "strongGravityMode", label: "Strong gravity mode", section: true },
@@ -419,7 +422,10 @@ async function init() {
   }
 
   // Add RPS counter:
-  const counter = countStepsPerSecond(graph, params.useFA2GPU ? params.iterationsPerStep : 1);
+  const counter = countStepsPerSecond(
+    graph,
+    params.useFA2GPU ? () => (fa2 as ForceAtlas2GPU).getTotalIterations() : undefined,
+  );
   if (counter.dom) document.body.append(counter.dom);
 
   // Function to reinitialize node positions
@@ -455,7 +461,7 @@ async function init() {
     } else {
       reinitializePositions();
       counter.reset();
-      fa2.start(1000);
+      fa2.start();
       toggleButton.textContent = "Stop layout";
       hasStarted = true;
     }

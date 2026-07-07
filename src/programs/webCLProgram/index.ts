@@ -23,6 +23,12 @@ export class WebCLProgram<
   }[];
   public dataTexturesIndex: Record<DATA_TEXTURE, (typeof this.dataTextures)[number]>;
 
+  // Async readback state (see startAsyncDataRead / pollAsyncDataRead):
+  private asyncReadPBO: WebGLBuffer | null = null;
+  private asyncReadFramebuffer: WebGLFramebuffer | null = null;
+  private asyncReadArray: Float32Array | null = null;
+  private asyncReadFence: WebGLSync | null = null;
+
   public outputBuffer: WebGLFramebuffer;
   public outputTextures: {
     name: OUTPUT_TEXTURE;
@@ -272,6 +278,76 @@ export class WebCLProgram<
     return outputArr;
   }
 
+  /**
+   * Starts an asynchronous read of a data texture, through a pixel pack
+   * buffer: the readPixels call is only *enqueued* (it targets the buffer,
+   * not an ArrayBuffer), so the CPU does not wait for the GPU. Call
+   * pollAsyncDataRead each frame to check for (and retrieve) the result.
+   *
+   * Returns false if a read is already in flight.
+   */
+  public startAsyncDataRead(textureName: DATA_TEXTURE): boolean {
+    const { gl } = this;
+    if (this.asyncReadFence) return false;
+
+    const { texture, attributesPerItem, items } = this.dataTexturesIndex[textureName];
+    const textureSize = getTextureSize(items);
+    const length = textureSize ** 2 * attributesPerItem;
+
+    if (!this.asyncReadPBO) this.asyncReadPBO = gl.createBuffer() as WebGLBuffer;
+    if (!this.asyncReadFramebuffer) this.asyncReadFramebuffer = gl.createFramebuffer() as WebGLFramebuffer;
+    if (!this.asyncReadArray || this.asyncReadArray.length !== length) {
+      this.asyncReadArray = new Float32Array(length);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.asyncReadPBO);
+      gl.bufferData(gl.PIXEL_PACK_BUFFER, length * 4, gl.STREAM_READ);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.asyncReadFramebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.asyncReadPBO);
+    gl.pixelStorei(gl.PACK_ALIGNMENT, 1);
+    gl.readPixels(0, 0, textureSize, textureSize, DATA_TEXTURES_FORMATS[attributesPerItem], gl.FLOAT, 0);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    this.asyncReadFence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) as WebGLSync;
+    gl.flush();
+    return true;
+  }
+
+  /**
+   * Polls the pending asynchronous read, without ever blocking. Returns the
+   * data if the GPU is done with it, null else. The returned Float32Array is
+   * reused across reads: consume it before starting a new read.
+   */
+  public pollAsyncDataRead(): Float32Array | null {
+    const { gl } = this;
+    if (!this.asyncReadFence || !this.asyncReadArray) return null;
+
+    const status = gl.clientWaitSync(this.asyncReadFence, 0, 0);
+    if (status === gl.TIMEOUT_EXPIRED) return null;
+
+    gl.deleteSync(this.asyncReadFence);
+    this.asyncReadFence = null;
+    if (status === gl.WAIT_FAILED) throw new Error("WebCLProgram: failed to wait for the async read fence");
+
+    // The GPU is done: this is now just a fast copy, not a pipeline stall.
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.asyncReadPBO);
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, this.asyncReadArray);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+
+    return this.asyncReadArray;
+  }
+
+  public cancelAsyncRead() {
+    if (this.asyncReadFence) {
+      this.gl.deleteSync(this.asyncReadFence);
+      this.asyncReadFence = null;
+    }
+  }
+
   // For testing purpose only
   public getInput(textureName: DATA_TEXTURE) {
     const { gl } = this;
@@ -301,6 +377,17 @@ export class WebCLProgram<
   public kill() {
     const { gl } = this;
     if (this.program) gl.deleteProgram(this.program);
+
+    this.cancelAsyncRead();
+    if (this.asyncReadPBO) {
+      gl.deleteBuffer(this.asyncReadPBO);
+      this.asyncReadPBO = null;
+    }
+    if (this.asyncReadFramebuffer) {
+      gl.deleteFramebuffer(this.asyncReadFramebuffer);
+      this.asyncReadFramebuffer = null;
+    }
+    this.asyncReadArray = null;
 
     this.dataTextures.forEach(({ texture }) => {
       gl.deleteTexture(texture);
